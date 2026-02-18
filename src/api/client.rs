@@ -549,6 +549,23 @@ impl CircleCIClient {
         let steps = self.get_job_steps(job_number).await?;
         let mut all_logs = Vec::new();
 
+        // Check if any action has logs
+        let has_any_logs = steps.iter().any(|step| {
+            step.actions.iter().any(|action| action.output_url.is_some())
+        });
+
+        if !has_any_logs {
+            // No logs available yet
+            all_logs.push("Job starting...".to_string());
+            all_logs.push(String::new());
+            all_logs.push("No logs available yet. This usually means:".to_string());
+            all_logs.push("• The job is still being prepared".to_string());
+            all_logs.push("• CircleCI is spinning up the environment".to_string());
+            all_logs.push(String::new());
+            all_logs.push("Logs will appear here once the job starts running.".to_string());
+            return Ok(all_logs);
+        }
+
         for (step_idx, step) in steps.iter().enumerate() {
             // Add separator between steps (not before first step)
             if step_idx > 0 {
@@ -571,11 +588,13 @@ impl CircleCIClient {
                             }
                         }
                         Err(e) => {
-                            all_logs.push(format!("    [Error fetching logs: {}]", e));
+                            all_logs.push(format!("[Error fetching logs: {}]", e));
                         }
                     }
                 } else if action.status == "running" {
-                    all_logs.push("    [Waiting for output...]".to_string());
+                    all_logs.push("[Waiting for output...]".to_string());
+                } else if action.status == "pending" {
+                    all_logs.push("[Pending...]".to_string());
                 }
 
                 all_logs.push(String::new());
