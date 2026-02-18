@@ -148,24 +148,49 @@ impl LogModal {
         let inner_area = block.inner(modal_area);
         f.render_widget(block, modal_area);
 
-        // Split the inner area into header, logs, and footer
+        // Split the inner area into header, loading indicator, logs, and footer
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Header (now 3 lines with timestamps)
-                Constraint::Min(0),    // Logs
-                Constraint::Length(1), // Footer
+                Constraint::Length(3),  // Header (3 lines with timestamps)
+                Constraint::Length(if self.is_loading { 1 } else { 0 }), // Loading indicator
+                Constraint::Min(0),     // Logs
+                Constraint::Length(1),  // Footer
             ])
             .split(inner_area);
 
         // Render header
         self.render_header(f, chunks[0]);
 
+        // Render loading indicator if loading
+        if self.is_loading {
+            self.render_loading_indicator(f, chunks[1]);
+        }
+
         // Render logs
-        self.render_logs(f, chunks[1]);
+        let log_area = if self.is_loading { chunks[2] } else { chunks[1] };
+        self.render_logs(f, log_area);
 
         // Render footer
-        self.render_footer(f, chunks[2]);
+        let footer_area = if self.is_loading { chunks[3] } else { chunks[2] };
+        self.render_footer(f, footer_area);
+    }
+
+    /// Render loading indicator with animated spinner
+    fn render_loading_indicator(&self, f: &mut Frame, area: Rect) {
+        let spinner = self.spinner_char();
+        let loading_line = Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Loading logs...", Style::default().fg(FG_DIM)),
+        ]);
+
+        let loading = Paragraph::new(vec![loading_line])
+            .style(Style::default().bg(BG_PANEL));
+
+        f.render_widget(loading, area);
     }
 
     /// Render the header section with job details
@@ -251,34 +276,31 @@ impl LogModal {
     /// Render the logs section with ANSI color support
     fn render_logs(&self, f: &mut Frame, area: Rect) {
         let visible_height = area.height as usize;
-        let max_scroll = self.log_lines.len().saturating_sub(visible_height);
+
+        // Filter out the "Loading logs..." placeholder if loading
+        let display_lines: Vec<&String> = if self.is_loading {
+            self.log_lines.iter().filter(|line| *line != "Loading logs...").collect()
+        } else {
+            self.log_lines.iter().collect()
+        };
+
+        let max_scroll = display_lines.len().saturating_sub(visible_height);
         let scroll_offset = self.scroll_offset.min(max_scroll);
 
         // Get available width for truncation (area width)
         let max_width = area.width as usize;
 
-        // Get current spinner character for loading message
-        let spinner = self.spinner_char();
-
         // Get the visible log lines with ANSI parsing and truncation
-        let visible_lines: Vec<Line> = self
-            .log_lines
+        let visible_lines: Vec<Line> = display_lines
             .iter()
             .skip(scroll_offset)
             .take(visible_height)
             .map(|line| {
-                // If loading, add spinner to "Loading logs..." message
-                let display_line = if self.is_loading && line == "Loading logs..." {
-                    format!("Loading logs... {}", spinner)
+                // Truncate line to fit within the available width
+                let truncated = if line.len() > max_width {
+                    format!("{}…", &line[..max_width.saturating_sub(1)])
                 } else {
                     line.to_string()
-                };
-
-                // Truncate line to fit within the available width
-                let truncated = if display_line.len() > max_width {
-                    format!("{}…", &display_line[..max_width.saturating_sub(1)])
-                } else {
-                    display_line
                 };
 
                 // Parse ANSI codes and convert to Ratatui styled text
