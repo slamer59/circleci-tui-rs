@@ -853,10 +853,17 @@ impl PipelineDetailScreen {
 
         // Calculate status summary
         let status_summary = self.calculate_status_summary();
-        let selected_workflow = &self.workflows[self.selected_workflow_index];
+
+        // Get workflow name (default if workflows not loaded yet)
+        let workflow_name = if !self.workflows.is_empty() && self.selected_workflow_index < self.workflows.len() {
+            &self.workflows[self.selected_workflow_index].name
+        } else {
+            "Loading..."
+        };
+
         let title = format!(
             " JOBS › {} {} ",
-            truncate_string(&selected_workflow.name, 20),
+            truncate_string(workflow_name, 20),
             status_summary
         );
 
