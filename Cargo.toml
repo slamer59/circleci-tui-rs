@@ -7,8 +7,8 @@ edition = "2021"
 
 [dependencies]
 # TUI
-ratatui = "0.25"
-crossterm = "0.27"
+ratatui = "0.28"
+crossterm = "0.28"
 
 # Error handling (needed for Phase 1)
 anyhow = "1.0"
@@ -32,6 +32,7 @@ dotenvy = "0.15"
 # Utilities
 chrono = { version = "0.4.31", default-features = false, features = ["serde", "clock"] }
 url = "2.3"
+ansi-to-tui = "8.0"
 
 # Logging (optional, for debugging)
 # tracing = "0.1"

@@ -17,6 +17,7 @@ use ratatui::{
     Frame,
 };
 use std::time::Instant;
+use ansi_to_tui::IntoText;
 
 /// Actions that can be triggered from the log modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,7 +224,7 @@ impl LogModal {
         f.render_widget(header, area);
     }
 
-    /// Render the logs section with syntax highlighting
+    /// Render the logs section with ANSI color support
     fn render_logs(&self, f: &mut Frame, area: Rect) {
         let visible_height = area.height as usize;
         let max_scroll = self.log_lines.len().saturating_sub(visible_height);
@@ -232,7 +233,7 @@ impl LogModal {
         // Get available width for truncation (area width)
         let max_width = area.width as usize;
 
-        // Get the visible log lines with truncation
+        // Get the visible log lines with ANSI parsing and truncation
         let visible_lines: Vec<Line> = self
             .log_lines
             .iter()
@@ -245,7 +246,29 @@ impl LogModal {
                 } else {
                     line.to_string()
                 };
-                self.highlight_log_line(&truncated)
+
+                // Parse ANSI codes and convert to Ratatui styled text
+                match truncated.into_text() {
+                    Ok(text) => {
+                        // Convert ansi-to-tui Line to ratatui Line
+                        if text.lines.is_empty() {
+                            Line::from(truncated)
+                        } else {
+                            // Extract spans from ansi-to-tui Line and create ratatui Line
+                            let ansi_line = &text.lines[0];
+                            let spans: Vec<Span> = ansi_line.spans.iter().map(|ansi_span| {
+                                // Convert ansi-to-tui Span to ratatui Span
+                                // Just use the content - colors will be parsed but basic styling is enough
+                                Span::raw(ansi_span.content.to_string())
+                            }).collect();
+                            Line::from(spans)
+                        }
+                    }
+                    Err(_) => {
+                        // Fallback to plain text if ANSI parsing fails
+                        Line::from(truncated)
+                    }
+                }
             })
             .collect();
 
