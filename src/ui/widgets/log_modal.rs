@@ -79,10 +79,8 @@ impl LogModal {
         self.is_loading = false;
         eprintln!("[DEBUG] is_loading set to false");
 
-        // Auto-scroll to bottom if enabled
-        if self.auto_scroll {
-            self.scroll_to_bottom();
-        }
+        // Always scroll to bottom when logs first load
+        self.scroll_to_bottom();
     }
 
     /// Advance spinner animation frame
@@ -119,7 +117,9 @@ impl LogModal {
 
     /// Scroll to the bottom of the logs
     fn scroll_to_bottom(&mut self) {
-        self.scroll_offset = self.log_lines.len().saturating_sub(1);
+        // Set scroll offset high enough to show the last lines
+        // It will be clamped to max_scroll in render_logs
+        self.scroll_offset = self.log_lines.len();
     }
 
     /// Render the modal to the frame
