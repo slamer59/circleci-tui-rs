@@ -18,6 +18,11 @@ use ratatui::{
 };
 use std::collections::HashSet;
 
+use std::time::Instant;
+
+/// Debounce delay for text filter input (milliseconds)
+const FILTER_DEBOUNCE_MS: u128 = 300;
+
 /// Pipeline screen with dense list and filters
 pub struct PipelineScreen {
     /// All pipelines (from mock data)
@@ -32,6 +37,10 @@ pub struct PipelineScreen {
     pub loading: bool,
     /// Text filter input
     pub filter_text: String,
+    /// Pending filter text (before debounce)
+    pub pending_filter_text: Option<String>,
+    /// Last time filter text was changed
+    pub last_filter_change: Option<Instant>,
     /// Branch filter (None = All)
     pub branch_filter: Option<String>,
     /// Status filter (None = All)
@@ -50,6 +59,8 @@ pub struct PipelineScreen {
     pub spinner: Spinner,
     /// Refreshing indicator
     pub refreshing: bool,
+    /// Filtering indicator (shown during debounce)
+    pub is_filtering: bool,
 }
 
 impl PipelineScreen {
@@ -89,6 +100,8 @@ impl PipelineScreen {
             selected_index: Some(0),
             loading: false,
             filter_text: String::new(),
+            pending_filter_text: None,
+            last_filter_change: None,
             branch_filter: None,
             status_filter: None,
             filter_focus: 0,
@@ -98,6 +111,7 @@ impl PipelineScreen {
             status_filter_index: 0,
             spinner: Spinner::new("Loading pipelines..."),
             refreshing: false,
+            is_filtering: false,
         }
     }
 
@@ -105,6 +119,22 @@ impl PipelineScreen {
     pub fn set_pipelines(&mut self, pipelines: Vec<Pipeline>) {
         self.pipelines = pipelines;
         self.apply_filters();
+    }
+
+    /// Check if debounced filter should be applied and apply it
+    pub fn check_debounce(&mut self) {
+        if let Some(last_change) = self.last_filter_change {
+            if last_change.elapsed().as_millis() >= FILTER_DEBOUNCE_MS {
+                // Debounce time has passed, apply the pending filter
+                if let Some(ref pending) = self.pending_filter_text {
+                    self.filter_text = pending.clone();
+                    self.apply_filters();
+                    self.is_filtering = false;
+                }
+                self.pending_filter_text = None;
+                self.last_filter_change = None;
+            }
+        }
     }
 
     /// Apply filters to the pipeline list
@@ -200,6 +230,9 @@ impl PipelineScreen {
 
     /// Render the pipeline screen
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        // Check if debounced filter should be applied
+        self.check_debounce();
+
         // Reset refreshing indicator after first render
         if self.refreshing {
             self.refreshing = false;
@@ -269,12 +302,17 @@ impl PipelineScreen {
             ])
             .split(inner);
 
-        // Text filter
-        let text_filter = format!(
-            "Filter: {}{}",
-            self.filter_text,
-            if self.filter_text.is_empty() { "_" } else { "" }
-        );
+        // Text filter - show pending text if debouncing
+        let display_text = self.pending_filter_text.as_ref().unwrap_or(&self.filter_text);
+        let text_filter = if self.is_filtering && self.pending_filter_text.is_some() {
+            format!("Filter: {} (filtering...)", display_text)
+        } else {
+            format!(
+                "Filter: {}{}",
+                display_text,
+                if display_text.is_empty() { "_" } else { "" }
+            )
+        };
         let text_style = if self.filter_focus == 1 {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
         } else {
@@ -320,29 +358,79 @@ impl PipelineScreen {
 
         // Check if loading or empty
         if self.loading {
-            // Show loading spinner
+            // Show loading spinner with elapsed time and cancel hint
             self.spinner.tick();
+            self.spinner.set_message("Loading pipelines from CircleCI...");
             let inner = block.inner(area);
-            f.render_widget(block, area);
 
-            let spinner_widget = self.spinner.render();
+            let block_with_hint = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(BORDER_FOCUSED))
+                .style(Style::default().bg(BG_PANEL))
+                .title(" Loading... ")
+                .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD));
+
+            let inner = block_with_hint.inner(area);
+            f.render_widget(block_with_hint, area);
+
+            // Create spinner display with hint
+            let spinner_lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        format!("{} ", self.spinner.current_frame()),
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("Loading pipelines from CircleCI...", Style::default().fg(FG_PRIMARY)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Press Esc to cancel",
+                    Style::default().fg(FG_DIM),
+                )),
+            ];
+
+            let spinner_widget = Paragraph::new(spinner_lines).alignment(Alignment::Center);
             f.render_widget(spinner_widget, inner);
         } else if self.filtered_pipelines.is_empty() {
-            // Show empty state message
+            // Show empty state message with ASCII art
             let inner = block.inner(area);
             f.render_widget(block, area);
 
             let empty_message = Paragraph::new(vec![
                 Line::from(""),
+                Line::from(""),
                 Line::from(Span::styled(
-                    "No pipelines found.",
-                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                    "    (╯°□°)╯︵ ┻━┻",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Try adjusting filters or press 'r' to refresh.",
+                    "No pipelines found",
+                    Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "This could mean:",
                     Style::default().fg(FG_DIM),
                 )),
+                Line::from(Span::styled(
+                    "  • No pipelines match your filters",
+                    Style::default().fg(FG_DIM),
+                )),
+                Line::from(Span::styled(
+                    "  • Project hasn't run any pipelines yet",
+                    Style::default().fg(FG_DIM),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Press ", Style::default().fg(FG_DIM)),
+                    Span::styled("'r'", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                    Span::styled(" to refresh or ", Style::default().fg(FG_DIM)),
+                    Span::styled("'Esc'", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                    Span::styled(" to clear filters", Style::default().fg(FG_DIM)),
+                ]),
             ])
             .alignment(Alignment::Center);
 
@@ -407,8 +495,12 @@ impl PipelineScreen {
             Span::styled(" Toggle  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[/]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Span::styled(" Filter  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[Esc]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Clear", Style::default().fg(FG_PRIMARY)),
+            Span::styled("[r]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" Refresh  ", Style::default().fg(FG_PRIMARY)),
+            Span::styled("[?]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" Help  ", Style::default().fg(FG_PRIMARY)),
+            Span::styled("[q]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" Quit", Style::default().fg(FG_PRIMARY)),
         ]))
         .alignment(Alignment::Center);
 
@@ -479,21 +571,30 @@ impl PipelineScreen {
                 false
             }
             KeyCode::Char(c) if self.filter_focus == 1 => {
-                // Add character to filter text
-                self.filter_text.push(c);
-                self.apply_filters();
+                // Add character to pending filter text (debounced)
+                let mut pending = self.pending_filter_text.take().unwrap_or(self.filter_text.clone());
+                pending.push(c);
+                self.pending_filter_text = Some(pending);
+                self.last_filter_change = Some(Instant::now());
+                self.is_filtering = true;
                 false
             }
             KeyCode::Backspace if self.filter_focus == 1 => {
-                // Remove character from filter text
-                self.filter_text.pop();
-                self.apply_filters();
+                // Remove character from pending filter text (debounced)
+                let mut pending = self.pending_filter_text.take().unwrap_or(self.filter_text.clone());
+                pending.pop();
+                self.pending_filter_text = Some(pending);
+                self.last_filter_change = Some(Instant::now());
+                self.is_filtering = true;
                 false
             }
             KeyCode::Esc if self.filter_focus > 0 => {
                 // Exit filter mode and reset all filters
                 self.filter_focus = 0;
                 self.filter_text.clear();
+                self.pending_filter_text = None;
+                self.last_filter_change = None;
+                self.is_filtering = false;
                 self.branch_filter = None;
                 self.branch_filter_index = 0;
                 self.status_filter = None;

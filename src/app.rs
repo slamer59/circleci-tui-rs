@@ -9,9 +9,13 @@ use crate::config::Config;
 use crate::ui::screens::{PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
 use crate::ui::widgets::log_modal::{LogModal, ModalAction};
 use crate::ui::widgets::confirm_modal::{ConfirmModal, ConfirmAction};
+use crate::ui::widgets::error_modal::{ErrorModal, ErrorAction};
+use crate::ui::widgets::help_modal::{HelpModal, HelpAction};
+use crate::ui::widgets::status_message::StatusMessage;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{backend::Backend, Frame, Terminal};
+use ratatui::layout::{Constraint, Direction, Layout};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,8 +48,12 @@ pub struct App {
     pub is_loading: bool,
     /// Confirmation modal for actions like rerun workflow
     pub confirm_modal: Option<ConfirmModal>,
-    /// Status message to display to the user
-    pub status_message: Option<String>,
+    /// Error modal for displaying API errors and other errors
+    pub error_modal: Option<ErrorModal>,
+    /// Help modal for keyboard shortcuts
+    pub help_modal: Option<HelpModal>,
+    /// Status message to display to the user (auto-hides after 5 seconds)
+    pub status_message: Option<StatusMessage>,
 }
 
 impl App {
@@ -66,6 +74,8 @@ impl App {
             config,
             api_client,
             confirm_modal: None,
+            error_modal: None,
+            help_modal: None,
             status_message: None,
             is_loading: false,
         })
@@ -100,9 +110,48 @@ impl App {
 
     /// Handle input events
     pub fn handle_event(&mut self, key: KeyEvent) -> Result<()> {
-        // Global quit handler
-        if key.code == KeyCode::Char('q') {
+        // Global help handler - '?' opens help modal
+        if key.code == KeyCode::Char('?') && self.help_modal.is_none() {
+            self.help_modal = Some(HelpModal::new());
+            return Ok(());
+        }
+
+        // Global quit handler (but not when help modal is open)
+        if key.code == KeyCode::Char('q') && self.help_modal.is_none() {
             self.should_quit = true;
+            return Ok(());
+        }
+
+        // Priority -1: If help modal is open, handle it first (highest priority)
+        if let Some(modal) = &mut self.help_modal {
+            match modal.handle_input(key) {
+                HelpAction::Close => {
+                    self.help_modal = None;
+                }
+                HelpAction::None => {
+                    // Continue showing modal
+                }
+            }
+            // Modal consumes all input when open
+            return Ok(());
+        }
+
+        // Priority 0: If error modal is open, handle error modal input first (highest priority)
+        if let Some(modal) = &mut self.error_modal {
+            match modal.handle_input(key) {
+                ErrorAction::Close => {
+                    self.error_modal = None;
+                }
+                ErrorAction::Retry => {
+                    // Close modal and let the user retry manually
+                    // In a real implementation, you would re-trigger the failed operation
+                    self.error_modal = None;
+                }
+                ErrorAction::None => {
+                    // Continue showing modal
+                }
+            }
+            // Modal consumes all input when open
             return Ok(());
         }
 
@@ -136,7 +185,9 @@ impl App {
                     if let Some(detail) = &mut self.pipeline_detail_screen {
                         if let Some(workflow_id) = &detail.confirm_workflow_id {
                             // Set status message - the actual API call should be made asynchronously
-                            self.status_message = Some(format!("Rerunning workflow {}...", workflow_id));
+                            self.status_message = Some(StatusMessage::info(
+                                format!("Rerunning workflow {}...", workflow_id)
+                            ));
                             // Note: In a real async implementation, you would call:
                             // tokio::spawn(self.api_client.rerun_workflow(workflow_id.clone()));
                         }
@@ -218,14 +269,52 @@ impl App {
     pub fn render(&mut self, f: &mut Frame) {
         let area = f.size();
 
+        // Check if status message expired and remove it
+        if let Some(ref msg) = self.status_message {
+            if msg.is_expired() {
+                self.status_message = None;
+            }
+        }
+
+        // Split layout: status bar (if present) + main content
+        let chunks = if self.status_message.is_some() {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // Status bar
+                    Constraint::Min(0),    // Main content
+                ])
+                .split(area)
+        } else {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(0), // No status bar
+                    Constraint::Min(0),    // Main content
+                ])
+                .split(area)
+        };
+
+        // Render status message at top if present
+        if let Some(ref msg) = self.status_message {
+            f.render_widget(msg.render(), chunks[0]);
+        }
+
+        // Determine the main content area
+        let main_area = if self.status_message.is_some() {
+            chunks[1]
+        } else {
+            area
+        };
+
         // Render base screen
         match &self.current_screen {
             Screen::Pipelines => {
-                self.pipeline_screen.render(f, area);
+                self.pipeline_screen.render(f, main_area);
             }
             Screen::PipelineDetail(_) => {
                 if let Some(detail) = &mut self.pipeline_detail_screen {
-                    detail.render(f, area);
+                    detail.render(f, main_area);
                 }
             }
         }
@@ -236,6 +325,14 @@ impl App {
         }
         // Render confirmation modal on top if open
         if let Some(modal) = &self.confirm_modal {
+            modal.render(f, area);
+        }
+        // Render error modal on top of everything (highest priority)
+        if let Some(modal) = &mut self.error_modal {
+            modal.render(f, area);
+        }
+        // Render help modal on top of everything (absolute highest priority)
+        if let Some(modal) = &self.help_modal {
             modal.render(f, area);
         }
     }
@@ -360,13 +457,20 @@ impl App {
     ///
     /// This is an async method that triggers a workflow rerun.
     pub async fn rerun_workflow(&mut self, workflow_id: &str) -> Result<()> {
+        // Show loading message
+        self.status_message = Some(StatusMessage::info(format!("Rerunning workflow {}...", workflow_id)));
+
         // Call API to rerun workflow
         match self.api_client.rerun_workflow(workflow_id).await {
             Ok(_) => {
-                self.status_message = Some(format!("Workflow {} rerun successfully", workflow_id));
+                self.status_message = Some(StatusMessage::success(
+                    format!("Workflow {} rerun successful!", workflow_id)
+                ));
             }
             Err(e) => {
-                self.status_message = Some(format!("Failed to rerun workflow: {}", e));
+                self.status_message = Some(StatusMessage::error(
+                    format!("Failed to rerun workflow: {}", e)
+                ));
             }
         }
         Ok(())
@@ -398,6 +502,92 @@ impl App {
             }
         }
         None
+    }
+
+    /// Show an error modal with a message
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - The title of the error modal
+    /// * `message` - The error message to display
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// app.show_error("API Error", "Failed to connect to CircleCI API");
+    /// ```
+    pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
+        self.error_modal = Some(ErrorModal::new(title.into(), message.into()));
+    }
+
+    /// Show an error modal with a message and detailed information
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - The title of the error modal
+    /// * `message` - The error message to display
+    /// * `details` - Detailed error information
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// app.show_error_with_details(
+    ///     "API Error",
+    ///     "API returned error 404: Not Found",
+    ///     "GET /api/v2/pipeline/abc123\nResponse: {\"message\":\"not found\"}"
+    /// );
+    /// ```
+    pub fn show_error_with_details(
+        &mut self,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        details: impl Into<String>,
+    ) {
+        self.error_modal = Some(ErrorModal::with_details(
+            title.into(),
+            message.into(),
+            details.into(),
+        ));
+    }
+
+    /// Show an error modal from an anyhow::Error
+    ///
+    /// # Arguments
+    ///
+    /// * `error` - The error to display
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// if let Err(e) = api_call().await {
+    ///     app.show_api_error(e);
+    /// }
+    /// ```
+    pub fn show_api_error(&mut self, error: anyhow::Error) {
+        let error_message = format!("{}", error);
+        let error_details = format!("{:?}", error);
+
+        // Determine title based on error type
+        let title = if error_message.contains("timeout") {
+            "Timeout Error"
+        } else if error_message.contains("404") || error_message.contains("Not Found") {
+            "Not Found"
+        } else if error_message.contains("401") || error_message.contains("403") {
+            "Authentication Error"
+        } else if error_message.contains("connect") || error_message.contains("network") {
+            "Network Error"
+        } else {
+            "API Error"
+        };
+
+        self.error_modal = Some(
+            ErrorModal::with_details(
+                title.to_string(),
+                error_message,
+                error_details,
+            )
+            .with_retry(),
+        );
     }
 }
 
@@ -456,18 +646,19 @@ mod tests {
     #[test]
     fn test_app_creation() {
         let config = create_test_config();
-        let app = App::new(config);
+        let app = App::new(config).unwrap();
 
         assert!(matches!(app.current_screen, Screen::Pipelines));
         assert!(!app.should_quit);
         assert!(app.pipeline_detail_screen.is_none());
         assert!(app.log_modal.is_none());
+        assert!(app.error_modal.is_none());
     }
 
     #[test]
     fn test_navigation_to_pipeline_detail() {
         let config = create_test_config();
-        let mut app = App::new(config);
+        let mut app = App::new(config).unwrap();
 
         let pipeline = create_test_pipeline();
 
@@ -490,7 +681,7 @@ mod tests {
     #[test]
     fn test_log_modal_operations() {
         let config = create_test_config();
-        let mut app = App::new(config);
+        let mut app = App::new(config).unwrap();
 
         let job = create_test_job();
 
@@ -507,7 +698,7 @@ mod tests {
     #[test]
     fn test_navigation_closes_modal() {
         let config = create_test_config();
-        let mut app = App::new(config);
+        let mut app = App::new(config).unwrap();
 
         let pipeline = create_test_pipeline();
         let job = create_test_job();
@@ -525,7 +716,7 @@ mod tests {
     #[test]
     fn test_two_screen_architecture() {
         let config = create_test_config();
-        let mut app = App::new(config);
+        let mut app = App::new(config).unwrap();
 
         let pipeline = create_test_pipeline();
 
@@ -545,5 +736,32 @@ mod tests {
         // Navigate back to Screen 1
         app.navigate_back_to_pipelines();
         assert!(matches!(app.current_screen, Screen::Pipelines));
+    }
+
+    #[test]
+    fn test_error_modal_operations() {
+        let config = create_test_config();
+        let mut app = App::new(config).unwrap();
+
+        // Show simple error
+        app.show_error("Test Error", "Something went wrong");
+        assert!(app.error_modal.is_some());
+
+        // Close error modal
+        app.error_modal = None;
+        assert!(app.error_modal.is_none());
+    }
+
+    #[test]
+    fn test_error_modal_with_details() {
+        let config = create_test_config();
+        let mut app = App::new(config).unwrap();
+
+        // Show error with details
+        app.show_error_with_details("API Error", "Request failed", "Details here");
+        assert!(app.error_modal.is_some());
+        if let Some(modal) = &app.error_modal {
+            assert!(modal.is_visible());
+        }
     }
 }

@@ -5,8 +5,8 @@
 /// - Right Panel (70%): Filtered jobs list for the selected workflow
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BG_INPUT, BG_PANEL, BORDER, BORDER_FOCUSED,
-    FG_BRIGHT, FG_DIM, FG_PRIMARY, SUCCESS, FAILED_TEXT, RUNNING,
+    get_status_color, get_status_icon, ACCENT, BG_INPUT, BG_PANEL, BLOCKED, BORDER,
+    BORDER_FOCUSED, FAILED_TEXT, FG_BRIGHT, FG_DIM, FG_PRIMARY, PENDING, RUNNING, SUCCESS,
 };
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
 use crate::ui::widgets::spinner::Spinner;
@@ -26,6 +26,8 @@ pub enum PanelFocus {
     Workflows,
     /// Right panel (jobs list)
     Jobs,
+    /// Status filters (checkboxes)
+    Filters,
 }
 
 /// Action returned from input handling
@@ -59,8 +61,20 @@ pub struct PipelineDetailScreen {
     pub focus: PanelFocus,
     /// Job filter text
     pub job_filter: String,
-    /// Show only failed jobs
+    /// Show only failed jobs (legacy)
     pub show_only_failed: bool,
+    /// Status filter: show success jobs
+    pub filter_success: bool,
+    /// Status filter: show running jobs
+    pub filter_running: bool,
+    /// Status filter: show failed jobs
+    pub filter_failed: bool,
+    /// Status filter: show pending jobs
+    pub filter_pending: bool,
+    /// Status filter: show blocked jobs
+    pub filter_blocked: bool,
+    /// Currently selected filter checkbox index (0-4)
+    pub selected_filter_index: usize,
     /// List state for workflow selection
     pub workflow_list_state: ListState,
     /// List state for job selection
@@ -115,6 +129,12 @@ impl PipelineDetailScreen {
             focus: PanelFocus::Workflows,
             job_filter: String::new(),
             show_only_failed: false,
+            filter_success: true,
+            filter_running: true,
+            filter_failed: true,
+            filter_pending: true,
+            filter_blocked: true,
+            selected_filter_index: 0,
             workflow_list_state,
             job_list_state,
             loading_workflows: false,
@@ -258,11 +278,14 @@ impl PipelineDetailScreen {
                         .contains(&self.job_filter.to_lowercase())
                 };
 
-                // Apply status filter
-                let matches_status = if self.show_only_failed {
-                    job.status == "failed"
-                } else {
-                    true
+                // Apply status filters
+                let matches_status = match job.status.as_str() {
+                    "success" | "passed" | "fixed" | "successful" => self.filter_success,
+                    "running" | "in_progress" | "in-progress" => self.filter_running,
+                    "failed" | "error" | "failure" => self.filter_failed,
+                    "pending" | "queued" => self.filter_pending,
+                    "blocked" | "waiting" => self.filter_blocked,
+                    _ => true, // Show unknown statuses by default
                 };
 
                 matches_filter && matches_status
@@ -272,12 +295,18 @@ impl PipelineDetailScreen {
 
     /// Handle keyboard input
     pub fn handle_input(&mut self, key: KeyEvent) -> PipelineDetailAction {
+        // Handle filter mode input
+        if self.focus == PanelFocus::Filters {
+            return self.handle_filter_input(key);
+        }
+
         match key.code {
             KeyCode::Tab => {
                 // Switch focus between panels
                 self.focus = match self.focus {
                     PanelFocus::Workflows => PanelFocus::Jobs,
                     PanelFocus::Jobs => PanelFocus::Workflows,
+                    PanelFocus::Filters => PanelFocus::Jobs,
                 };
                 PipelineDetailAction::None
             }
@@ -285,6 +314,7 @@ impl PipelineDetailScreen {
                 match self.focus {
                     PanelFocus::Workflows => self.select_previous_workflow(),
                     PanelFocus::Jobs => self.select_previous_job(),
+                    PanelFocus::Filters => {},
                 }
                 PipelineDetailAction::None
             }
@@ -292,6 +322,7 @@ impl PipelineDetailScreen {
                 match self.focus {
                     PanelFocus::Workflows => self.select_next_workflow(),
                     PanelFocus::Jobs => self.select_next_job(),
+                    PanelFocus::Filters => {},
                 }
                 PipelineDetailAction::None
             }
@@ -308,16 +339,12 @@ impl PipelineDetailScreen {
                 PipelineDetailAction::None
             }
             KeyCode::Char('f') => {
-                // Toggle failed filter
-                self.show_only_failed = !self.show_only_failed;
-                // Reset job selection
-                let filtered_jobs = self.get_filtered_jobs();
-                if !filtered_jobs.is_empty() {
-                    self.selected_job_index = Some(0);
-                    self.job_list_state.select(Some(0));
+                // Toggle filter focus mode
+                if self.focus == PanelFocus::Filters {
+                    self.focus = PanelFocus::Jobs;
                 } else {
-                    self.selected_job_index = None;
-                    self.job_list_state.select(None);
+                    self.focus = PanelFocus::Filters;
+                    self.selected_filter_index = 0;
                 }
                 PipelineDetailAction::None
             }
@@ -339,6 +366,58 @@ impl PipelineDetailScreen {
             }
             KeyCode::Esc => PipelineDetailAction::Back,
             _ => PipelineDetailAction::None,
+        }
+    }
+
+    /// Handle input when in filter mode
+    fn handle_filter_input(&mut self, key: KeyEvent) -> PipelineDetailAction {
+        match key.code {
+            KeyCode::Left => {
+                if self.selected_filter_index > 0 {
+                    self.selected_filter_index -= 1;
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Right | KeyCode::Tab => {
+                if self.selected_filter_index < 4 {
+                    self.selected_filter_index += 1;
+                } else {
+                    self.selected_filter_index = 0;
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Char(' ') | KeyCode::Enter => {
+                // Toggle the selected filter
+                self.toggle_selected_filter();
+                // Reset job selection
+                let filtered_jobs = self.get_filtered_jobs();
+                if !filtered_jobs.is_empty() {
+                    self.selected_job_index = Some(0);
+                    self.job_list_state.select(Some(0));
+                } else {
+                    self.selected_job_index = None;
+                    self.job_list_state.select(None);
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Esc | KeyCode::Char('f') => {
+                // Exit filter mode
+                self.focus = PanelFocus::Jobs;
+                PipelineDetailAction::None
+            }
+            _ => PipelineDetailAction::None,
+        }
+    }
+
+    /// Toggle the currently selected filter checkbox
+    fn toggle_selected_filter(&mut self) {
+        match self.selected_filter_index {
+            0 => self.filter_success = !self.filter_success,
+            1 => self.filter_running = !self.filter_running,
+            2 => self.filter_failed = !self.filter_failed,
+            3 => self.filter_pending = !self.filter_pending,
+            4 => self.filter_blocked = !self.filter_blocked,
+            _ => {}
         }
     }
 
@@ -539,20 +618,31 @@ impl PipelineDetailScreen {
             let spinner_widget = self.spinner.render();
             f.render_widget(spinner_widget, inner);
         } else if self.workflows.is_empty() {
-            // Show empty state
+            // Show empty state with ASCII art
             let inner = block.inner(area);
             f.render_widget(block, area);
 
             let empty_message = Paragraph::new(vec![
                 Line::from(""),
                 Line::from(Span::styled(
-                    "No workflows found",
-                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                    "  ¯\\_(ツ)_/¯",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "No workflows",
+                    Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
-                    "for this pipeline",
+                    "found",
                     Style::default().fg(FG_DIM),
                 )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Press ", Style::default().fg(FG_DIM)),
+                    Span::styled("'Esc'", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                    Span::styled(" to go back", Style::default().fg(FG_DIM)),
+                ]),
             ])
             .alignment(Alignment::Center);
 
@@ -610,11 +700,12 @@ impl PipelineDetailScreen {
 
     /// Render the jobs panel (right side)
     fn render_jobs_panel(&mut self, f: &mut Frame, area: Rect) {
-        // Split into filter bar and job list
+        // Split into filter bar, status filters, and job list
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Filter bar
+                Constraint::Length(3), // Filter bar (text filter)
+                Constraint::Length(1), // Status filter checkboxes
                 Constraint::Min(0),    // Job list
             ])
             .split(area);
@@ -622,8 +713,11 @@ impl PipelineDetailScreen {
         // Render filter bar
         self.render_filter_bar(f, chunks[0]);
 
+        // Render status filters
+        self.render_status_filters(f, chunks[1]);
+
         // Render job list
-        self.render_job_list(f, chunks[1]);
+        self.render_job_list(f, chunks[2]);
     }
 
     /// Render the filter bar
@@ -634,17 +728,13 @@ impl PipelineDetailScreen {
             self.job_filter.clone()
         };
 
-        let failed_checkbox = if self.show_only_failed { "☑" } else { "☐" };
+        let filter_info = self.get_filter_info();
 
         let line = Line::from(vec![
             Span::styled("Filter: [", Style::default().fg(FG_PRIMARY)),
             Span::styled(&filter_display, Style::default().fg(FG_DIM)),
             Span::styled("]  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled(
-                format!("{}Failed ", failed_checkbox),
-                Style::default().fg(FG_PRIMARY),
-            ),
-            Span::styled("☐All", Style::default().fg(FG_DIM)),
+            Span::styled(filter_info, Style::default().fg(FG_DIM)),
         ]);
 
         let block = Block::default()
@@ -654,6 +744,99 @@ impl PipelineDetailScreen {
             .style(Style::default().bg(BG_INPUT));
 
         let paragraph = Paragraph::new(line).block(block);
+        f.render_widget(paragraph, area);
+    }
+
+    /// Get filter info display string
+    fn get_filter_info(&self) -> String {
+        let enabled_count = [
+            self.filter_success,
+            self.filter_running,
+            self.filter_failed,
+            self.filter_pending,
+            self.filter_blocked,
+        ]
+        .iter()
+        .filter(|&&enabled| enabled)
+        .count();
+
+        if enabled_count == 5 {
+            "All statuses".to_string()
+        } else {
+            format!("Filters: {}/5 statuses", enabled_count)
+        }
+    }
+
+    /// Render status filter checkboxes
+    fn render_status_filters(&self, f: &mut Frame, area: Rect) {
+        let success_checkbox = if self.filter_success { "☑" } else { "☐" };
+        let running_checkbox = if self.filter_running { "☑" } else { "☐" };
+        let failed_checkbox = if self.filter_failed { "☑" } else { "☐" };
+        let pending_checkbox = if self.filter_pending { "☑" } else { "☐" };
+        let blocked_checkbox = if self.filter_blocked { "☑" } else { "☐" };
+
+        let in_filter_mode = self.focus == PanelFocus::Filters;
+
+        let spans = vec![
+            // Success checkbox
+            Span::styled(
+                format!("{} Success  ", success_checkbox),
+                Style::default().fg(SUCCESS).add_modifier(
+                    if in_filter_mode && self.selected_filter_index == 0 {
+                        Modifier::BOLD | Modifier::UNDERLINED
+                    } else {
+                        Modifier::empty()
+                    }
+                ),
+            ),
+            // Running checkbox
+            Span::styled(
+                format!("{} Running  ", running_checkbox),
+                Style::default().fg(RUNNING).add_modifier(
+                    if in_filter_mode && self.selected_filter_index == 1 {
+                        Modifier::BOLD | Modifier::UNDERLINED
+                    } else {
+                        Modifier::empty()
+                    }
+                ),
+            ),
+            // Failed checkbox
+            Span::styled(
+                format!("{} Failed  ", failed_checkbox),
+                Style::default().fg(FAILED_TEXT).add_modifier(
+                    if in_filter_mode && self.selected_filter_index == 2 {
+                        Modifier::BOLD | Modifier::UNDERLINED
+                    } else {
+                        Modifier::empty()
+                    }
+                ),
+            ),
+            // Pending checkbox
+            Span::styled(
+                format!("{} Pending  ", pending_checkbox),
+                Style::default().fg(PENDING).add_modifier(
+                    if in_filter_mode && self.selected_filter_index == 3 {
+                        Modifier::BOLD | Modifier::UNDERLINED
+                    } else {
+                        Modifier::empty()
+                    }
+                ),
+            ),
+            // Blocked checkbox
+            Span::styled(
+                format!("{} Blocked", blocked_checkbox),
+                Style::default().fg(BLOCKED).add_modifier(
+                    if in_filter_mode && self.selected_filter_index == 4 {
+                        Modifier::BOLD | Modifier::UNDERLINED
+                    } else {
+                        Modifier::empty()
+                    }
+                ),
+            ),
+        ];
+
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(line);
         f.render_widget(paragraph, area);
     }
 
@@ -699,8 +882,13 @@ impl PipelineDetailScreen {
                 Paragraph::new(vec![
                     Line::from(""),
                     Line::from(Span::styled(
+                        "  ¯\\_(ツ)_/¯",
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
                         "No jobs found",
-                        Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                        Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
                     )),
                     Line::from(Span::styled(
                         "for this workflow",
@@ -712,13 +900,22 @@ impl PipelineDetailScreen {
                 Paragraph::new(vec![
                     Line::from(""),
                     Line::from(Span::styled(
-                        "No jobs match filters",
-                        Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                        "  (•_•)",
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                     )),
+                    Line::from(""),
                     Line::from(Span::styled(
-                        "Press 'f' to toggle filters",
-                        Style::default().fg(FG_DIM),
+                        "No jobs match filters",
+                        Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
                     )),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Press ", Style::default().fg(FG_DIM)),
+                        Span::styled("'f'", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                        Span::styled(" to toggle filters or ", Style::default().fg(FG_DIM)),
+                        Span::styled("'Tab'", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                        Span::styled(" to switch panel", Style::default().fg(FG_DIM)),
+                    ]),
                 ])
             }
             .alignment(Alignment::Center);
@@ -852,8 +1049,16 @@ impl PipelineDetailScreen {
             Span::styled("[⏎]", Style::default().fg(ACCENT)),
             Span::styled(" View Logs  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[f]", Style::default().fg(ACCENT)),
-            Span::styled(" Filter Failed  ", Style::default().fg(FG_PRIMARY)),
+            Span::styled(" Toggle Filters  ", Style::default().fg(FG_PRIMARY)),
         ];
+
+        // Add filter mode shortcuts if in filter mode
+        if self.focus == PanelFocus::Filters {
+            footer_items.push(Span::styled("[←→]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled(" Navigate  ", Style::default().fg(FG_PRIMARY)));
+            footer_items.push(Span::styled("[Space]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled(" Toggle  ", Style::default().fg(FG_PRIMARY)));
+        }
 
         // Add "Load More" to footer if pagination is available
         if self.can_load_more() && self.focus == PanelFocus::Jobs {
@@ -866,6 +1071,8 @@ impl PipelineDetailScreen {
             footer_items.push(Span::styled(" Rerun Workflow  ", Style::default().fg(FG_PRIMARY)));
         }
 
+        footer_items.push(Span::styled("[?]", Style::default().fg(ACCENT)));
+        footer_items.push(Span::styled(" Help  ", Style::default().fg(FG_PRIMARY)));
         footer_items.push(Span::styled("[Esc]", Style::default().fg(ACCENT)));
         footer_items.push(Span::styled(" Back", Style::default().fg(FG_PRIMARY)));
 
@@ -971,6 +1178,77 @@ mod tests {
 
         // Check that only failed jobs are returned
         assert!(filtered.iter().all(|job| job.status == "failed"));
+    }
+
+    #[test]
+    fn test_status_filters() {
+        let pipeline = create_test_pipeline();
+        let mut screen = PipelineDetailScreen::new(pipeline);
+
+        // Test filtering by specific status
+        screen.filter_success = false;
+        screen.filter_running = true;
+        screen.filter_failed = true;
+        screen.filter_pending = true;
+        screen.filter_blocked = true;
+
+        let filtered = screen.get_filtered_jobs();
+        // No success jobs should be included
+        assert!(filtered.iter().all(|job| job.status != "success"));
+
+        // Test filtering only failed jobs
+        screen.filter_success = false;
+        screen.filter_running = false;
+        screen.filter_failed = true;
+        screen.filter_pending = false;
+        screen.filter_blocked = false;
+
+        let filtered = screen.get_filtered_jobs();
+        // Only failed jobs should be included
+        assert!(filtered
+            .iter()
+            .all(|job| job.status == "failed" || job.status == "error" || job.status == "failure"));
+    }
+
+    #[test]
+    fn test_filter_toggle() {
+        let pipeline = create_test_pipeline();
+        let mut screen = PipelineDetailScreen::new(pipeline);
+
+        // Test toggling filters
+        let initial = screen.filter_success;
+        screen.selected_filter_index = 0;
+        screen.toggle_selected_filter();
+        assert_eq!(screen.filter_success, !initial);
+
+        let initial = screen.filter_running;
+        screen.selected_filter_index = 1;
+        screen.toggle_selected_filter();
+        assert_eq!(screen.filter_running, !initial);
+
+        let initial = screen.filter_failed;
+        screen.selected_filter_index = 2;
+        screen.toggle_selected_filter();
+        assert_eq!(screen.filter_failed, !initial);
+    }
+
+    #[test]
+    fn test_get_filter_info() {
+        let pipeline = create_test_pipeline();
+        let mut screen = PipelineDetailScreen::new(pipeline);
+
+        // All filters enabled
+        assert_eq!(screen.get_filter_info(), "All statuses");
+
+        // Some filters disabled
+        screen.filter_success = false;
+        screen.filter_running = false;
+        assert_eq!(screen.get_filter_info(), "Filters: 3/5 statuses");
+
+        // Only one filter enabled
+        screen.filter_failed = false;
+        screen.filter_pending = false;
+        assert_eq!(screen.get_filter_info(), "Filters: 1/5 statuses");
     }
 
     #[test]

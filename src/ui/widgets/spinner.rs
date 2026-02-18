@@ -26,16 +26,29 @@ pub struct Spinner {
     last_update: Instant,
     /// Message to display next to spinner
     message: String,
+    /// Time when spinner was created (for elapsed time tracking)
+    created_at: Instant,
+    /// Whether to show elapsed time
+    show_elapsed: bool,
 }
 
 impl Spinner {
     /// Create a new spinner with the given message
     pub fn new(message: impl Into<String>) -> Self {
+        let now = Instant::now();
         Self {
             current_frame: 0,
-            last_update: Instant::now(),
+            last_update: now,
             message: message.into(),
+            created_at: now,
+            show_elapsed: false,
         }
+    }
+
+    /// Enable showing elapsed time
+    pub fn with_elapsed_time(mut self) -> Self {
+        self.show_elapsed = true;
+        self
     }
 
     /// Update the spinner animation
@@ -62,18 +75,35 @@ impl Spinner {
         self.message = message.into();
     }
 
+    /// Get elapsed time in seconds
+    fn elapsed_seconds(&self) -> u64 {
+        self.created_at.elapsed().as_secs()
+    }
+
     /// Render the spinner as a paragraph
     ///
     /// Returns a Paragraph widget that can be rendered to the terminal.
     pub fn render(&self) -> Paragraph<'_> {
-        let line = Line::from(vec![
+        let mut spans = vec![
             Span::styled(
                 format!("{} ", self.current_frame()),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(&self.message, Style::default().fg(FG_PRIMARY)),
-        ]);
+        ];
 
+        // Add elapsed time if enabled
+        if self.show_elapsed {
+            let elapsed = self.elapsed_seconds();
+            if elapsed > 0 {
+                spans.push(Span::styled(
+                    format!(" ({}s)", elapsed),
+                    Style::default().fg(FG_DIM),
+                ));
+            }
+        }
+
+        let line = Line::from(spans);
         Paragraph::new(line).alignment(Alignment::Center)
     }
 
