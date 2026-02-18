@@ -229,18 +229,28 @@ impl LogModal {
         let max_scroll = self.log_lines.len().saturating_sub(visible_height);
         let scroll_offset = self.scroll_offset.min(max_scroll);
 
-        // Get the visible log lines
+        // Get available width for truncation (area width)
+        let max_width = area.width as usize;
+
+        // Get the visible log lines with truncation
         let visible_lines: Vec<Line> = self
             .log_lines
             .iter()
             .skip(scroll_offset)
             .take(visible_height)
-            .map(|line| self.highlight_log_line(line))
+            .map(|line| {
+                // Truncate line to fit within the available width
+                let truncated = if line.len() > max_width {
+                    format!("{}…", &line[..max_width.saturating_sub(1)])
+                } else {
+                    line.to_string()
+                };
+                self.highlight_log_line(&truncated)
+            })
             .collect();
 
         let logs = Paragraph::new(visible_lines)
             .style(Style::default().bg(BG_DARK).fg(FG_PRIMARY))
-            .wrap(Wrap { trim: false })
             .scroll((0, 0)); // Disable automatic scrolling
 
         f.render_widget(logs, area);
@@ -282,19 +292,19 @@ impl LogModal {
         f.render_widget(footer, area);
     }
 
-    /// Apply syntax highlighting to a log line
-    fn highlight_log_line<'a>(&self, line: &'a str) -> Line<'a> {
+    /// Apply syntax highlighting to a log line (returns owned Line)
+    fn highlight_log_line(&self, line: &str) -> Line<'static> {
         // Command lines (starting with $)
         if line.trim_start().starts_with('$') {
             return Line::from(Span::styled(
-                line,
+                line.to_string(),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ));
         }
 
         // Success lines (containing ✓ or "success")
         if line.contains('✓') || line.to_lowercase().contains("success") {
-            return Line::from(Span::styled(line, Style::default().fg(SUCCESS)));
+            return Line::from(Span::styled(line.to_string(), Style::default().fg(SUCCESS)));
         }
 
         // Error lines (containing ✗ or "error"/"failed")
@@ -302,7 +312,7 @@ impl LogModal {
             || line.to_lowercase().contains("error")
             || line.to_lowercase().contains("failed")
         {
-            return Line::from(Span::styled(line, Style::default().fg(FAILED_TEXT)));
+            return Line::from(Span::styled(line.to_string(), Style::default().fg(FAILED_TEXT)));
         }
 
         // Timestamp lines (starting with [)
@@ -314,13 +324,13 @@ impl LogModal {
                         format!("{}]", parts[0]),
                         Style::default().fg(FG_DIM),
                     ),
-                    Span::styled(parts[1], Style::default().fg(FG_PRIMARY)),
+                    Span::styled(parts[1].to_string(), Style::default().fg(FG_PRIMARY)),
                 ]);
             }
         }
 
         // Default styling
-        Line::from(Span::styled(line, Style::default().fg(FG_PRIMARY)))
+        Line::from(Span::styled(line.to_string(), Style::default().fg(FG_PRIMARY)))
     }
 
     /// Handle keyboard input
