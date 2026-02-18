@@ -54,6 +54,10 @@ pub struct App {
     pub help_modal: Option<HelpModal>,
     /// Status message to display to the user (auto-hides after 5 seconds)
     pub status_message: Option<StatusMessage>,
+    /// Pending workflow load (pipeline_id)
+    pub pending_workflow_load: Option<String>,
+    /// Pending job load (workflow_id)
+    pub pending_job_load: Option<String>,
 }
 
 impl App {
@@ -78,6 +82,8 @@ impl App {
             help_modal: None,
             status_message: None,
             is_loading: false,
+            pending_workflow_load: None,
+            pending_job_load: None,
         })
     }
 
@@ -238,6 +244,10 @@ impl App {
                             // The actual loading should be handled in the main event loop
                             // For now, this is a placeholder for the action
                         }
+                        PipelineDetailAction::LoadJobs(workflow_id) => {
+                            // Trigger job loading
+                            self.trigger_job_load(workflow_id);
+                        }
                         PipelineDetailAction::RerunWorkflow(workflow_id) => {
                             // Show confirmation modal
                             if let Some(detail) = &self.pipeline_detail_screen {
@@ -341,7 +351,16 @@ impl App {
     ///
     /// Opens the pipeline detail view showing workflow tree and jobs list.
     pub fn navigate_to_pipeline_detail(&mut self, pipeline: Pipeline) {
+        // Create screen with empty data - workflows will be loaded async
         self.pipeline_detail_screen = Some(PipelineDetailScreen::new(pipeline.clone()));
+
+        // Set the screen to show loading state
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.loading_workflows = true;
+        }
+
+        // Trigger async workflow loading
+        self.pending_workflow_load = Some(pipeline.id.clone());
         self.current_screen = Screen::PipelineDetail(pipeline);
     }
 
@@ -392,11 +411,27 @@ impl App {
         self.is_loading = true;
 
         // Fetch workflows from API
-        let workflows = self.api_client.get_workflows(pipeline_id).await?;
+        match self.api_client.get_workflows(pipeline_id).await {
+            Ok(workflows) => {
+                // Update detail screen with workflows
+                if let Some(detail) = &mut self.pipeline_detail_screen {
+                    detail.set_workflows(workflows.clone());
+                    detail.loading_workflows = false;
 
-        // Update detail screen with workflows
-        if let Some(detail) = &mut self.pipeline_detail_screen {
-            detail.set_workflows(workflows);
+                    // Auto-load jobs for the first workflow
+                    if !workflows.is_empty() {
+                        detail.loading_jobs = true;
+                        self.pending_job_load = Some(workflows[0].id.clone());
+                    }
+                }
+            }
+            Err(e) => {
+                // Show error modal
+                self.show_api_error(e.into());
+                if let Some(detail) = &mut self.pipeline_detail_screen {
+                    detail.loading_workflows = false;
+                }
+            }
         }
 
         self.is_loading = false;
@@ -410,11 +445,21 @@ impl App {
         self.is_loading = true;
 
         // Fetch jobs from API (returns tuple with pagination info)
-        let (jobs, next_page_token) = self.api_client.get_jobs(workflow_id).await?;
-
-        // Update detail screen with jobs and pagination info
-        if let Some(detail) = &mut self.pipeline_detail_screen {
-            detail.set_jobs_with_pagination(jobs, next_page_token, None);
+        match self.api_client.get_jobs(workflow_id).await {
+            Ok((jobs, next_page_token)) => {
+                // Update detail screen with jobs and pagination info
+                if let Some(detail) = &mut self.pipeline_detail_screen {
+                    detail.set_jobs_with_pagination(jobs, next_page_token, None);
+                    detail.loading_jobs = false;
+                }
+            }
+            Err(e) => {
+                // Show error modal
+                self.show_api_error(e.into());
+                if let Some(detail) = &mut self.pipeline_detail_screen {
+                    detail.loading_jobs = false;
+                }
+            }
         }
 
         self.is_loading = false;
@@ -502,6 +547,30 @@ impl App {
             }
         }
         None
+    }
+
+    /// Check if workflows need to be loaded
+    ///
+    /// Returns the pipeline_id if workflows need to be loaded.
+    pub fn should_load_workflows(&self) -> Option<String> {
+        self.pending_workflow_load.clone()
+    }
+
+    /// Check if jobs need to be loaded
+    ///
+    /// Returns the workflow_id if jobs need to be loaded.
+    pub fn should_load_jobs(&self) -> Option<String> {
+        self.pending_job_load.clone()
+    }
+
+    /// Trigger job loading for the selected workflow
+    ///
+    /// This is called when the user navigates between workflows.
+    pub fn trigger_job_load(&mut self, workflow_id: String) {
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.loading_jobs = true;
+        }
+        self.pending_job_load = Some(workflow_id);
     }
 
     /// Show an error modal with a message

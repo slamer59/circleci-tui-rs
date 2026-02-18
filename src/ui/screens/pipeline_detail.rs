@@ -43,6 +43,8 @@ pub enum PipelineDetailAction {
     LoadMoreJobs,
     /// Rerun a workflow
     RerunWorkflow(String),
+    /// Load jobs for a workflow
+    LoadJobs(String),
 }
 
 /// Pipeline detail screen with workflow tree and jobs list
@@ -100,17 +102,13 @@ pub struct PipelineDetailScreen {
 impl PipelineDetailScreen {
     /// Create a new pipeline detail screen
     pub fn new(pipeline: Pipeline) -> Self {
-        let workflows = crate::api::models::mock_data::mock_workflows(&pipeline.id);
+        let workflows = Vec::new();
         let selected_workflow_index = 0;
 
-        // Load jobs for the first workflow
-        let jobs = if !workflows.is_empty() {
-            crate::api::models::mock_data::mock_jobs(&workflows[0].id)
-        } else {
-            Vec::new()
-        };
+        // Initialize with empty jobs - app will trigger real API loading
+        let jobs = Vec::new();
 
-        let selected_job_index = if jobs.is_empty() { None } else { Some(0) };
+        let selected_job_index = None;
 
         let mut workflow_list_state = ListState::default();
         workflow_list_state.select(Some(0));
@@ -251,17 +249,12 @@ impl PipelineDetailScreen {
         self.selected_workflow_index = index;
         self.workflow_list_state.select(Some(index));
 
-        // Load jobs for the selected workflow
-        self.jobs = crate::api::models::mock_data::mock_jobs(&self.workflows[index].id);
+        // Clear jobs - app will trigger real API loading
+        self.jobs.clear();
 
         // Reset job selection
-        if !self.jobs.is_empty() {
-            self.selected_job_index = Some(0);
-            self.job_list_state.select(Some(0));
-        } else {
-            self.selected_job_index = None;
-            self.job_list_state.select(None);
-        }
+        self.selected_job_index = None;
+        self.job_list_state.select(None);
     }
 
     /// Get the filtered list of jobs
@@ -312,7 +305,14 @@ impl PipelineDetailScreen {
             }
             KeyCode::Up => {
                 match self.focus {
-                    PanelFocus::Workflows => self.select_previous_workflow(),
+                    PanelFocus::Workflows => {
+                        self.select_previous_workflow();
+                        // Return LoadJobs action to trigger job loading for the selected workflow
+                        if !self.workflows.is_empty() {
+                            let workflow_id = self.workflows[self.selected_workflow_index].id.clone();
+                            return PipelineDetailAction::LoadJobs(workflow_id);
+                        }
+                    },
                     PanelFocus::Jobs => self.select_previous_job(),
                     PanelFocus::Filters => {},
                 }
@@ -320,7 +320,14 @@ impl PipelineDetailScreen {
             }
             KeyCode::Down => {
                 match self.focus {
-                    PanelFocus::Workflows => self.select_next_workflow(),
+                    PanelFocus::Workflows => {
+                        self.select_next_workflow();
+                        // Return LoadJobs action to trigger job loading for the selected workflow
+                        if !self.workflows.is_empty() {
+                            let workflow_id = self.workflows[self.selected_workflow_index].id.clone();
+                            return PipelineDetailAction::LoadJobs(workflow_id);
+                        }
+                    },
                     PanelFocus::Jobs => self.select_next_job(),
                     PanelFocus::Filters => {},
                 }
@@ -1124,8 +1131,9 @@ mod tests {
         let pipeline = create_test_pipeline();
         let screen = PipelineDetailScreen::new(pipeline);
 
-        assert!(!screen.workflows.is_empty());
-        assert!(!screen.jobs.is_empty());
+        // Should start with empty workflows and jobs - app will load from API
+        assert!(screen.workflows.is_empty());
+        assert!(screen.jobs.is_empty());
         assert_eq!(screen.selected_workflow_index, 0);
         assert_eq!(screen.focus, PanelFocus::Workflows);
     }
@@ -1135,18 +1143,58 @@ mod tests {
         let pipeline = create_test_pipeline();
         let mut screen = PipelineDetailScreen::new(pipeline);
 
-        let initial_jobs_count = screen.jobs.len();
-        screen.select_workflow(1);
+        // Add some test workflows using setter
+        use crate::api::models::Workflow;
+        use chrono::Utc;
+        let workflows = vec![
+            Workflow {
+                id: "wf1".to_string(),
+                name: "build".to_string(),
+                status: "success".to_string(),
+                created_at: Utc::now(),
+                stopped_at: Some(Utc::now()),
+            },
+            Workflow {
+                id: "wf2".to_string(),
+                name: "test".to_string(),
+                status: "success".to_string(),
+                created_at: Utc::now(),
+                stopped_at: Some(Utc::now()),
+            },
+        ];
+        screen.set_workflows(workflows);
 
+        screen.select_workflow(1);
         assert_eq!(screen.selected_workflow_index, 1);
-        // Jobs should be reloaded
-        assert_eq!(screen.jobs.len(), initial_jobs_count); // Mock data returns same count
+        // Jobs should be cleared when switching workflows
+        assert_eq!(screen.jobs.len(), 0);
     }
 
     #[test]
     fn test_workflow_navigation() {
         let pipeline = create_test_pipeline();
         let mut screen = PipelineDetailScreen::new(pipeline);
+
+        // Add test workflows
+        use crate::api::models::Workflow;
+        use chrono::Utc;
+        let workflows = vec![
+            Workflow {
+                id: "wf1".to_string(),
+                name: "build".to_string(),
+                status: "success".to_string(),
+                created_at: Utc::now(),
+                stopped_at: Some(Utc::now()),
+            },
+            Workflow {
+                id: "wf2".to_string(),
+                name: "test".to_string(),
+                status: "success".to_string(),
+                created_at: Utc::now(),
+                stopped_at: Some(Utc::now()),
+            },
+        ];
+        screen.set_workflows(workflows);
 
         screen.select_next_workflow();
         assert_eq!(screen.selected_workflow_index, 1);
@@ -1159,6 +1207,29 @@ mod tests {
     fn test_job_navigation() {
         let pipeline = create_test_pipeline();
         let mut screen = PipelineDetailScreen::new(pipeline);
+
+        // Add test jobs
+        use crate::api::models::Job;
+        use chrono::Utc;
+        let jobs = vec![
+            Job {
+                id: "job1".to_string(),
+                name: "build".to_string(),
+                status: "success".to_string(),
+                job_number: 1,
+                started_at: Some(Utc::now()),
+                stopped_at: Some(Utc::now()),
+            },
+            Job {
+                id: "job2".to_string(),
+                name: "test".to_string(),
+                status: "success".to_string(),
+                job_number: 2,
+                started_at: Some(Utc::now()),
+                stopped_at: Some(Utc::now()),
+            },
+        ];
+        screen.set_jobs(jobs);
 
         screen.focus = PanelFocus::Jobs;
         screen.select_next_job();
@@ -1173,6 +1244,29 @@ mod tests {
         let pipeline = create_test_pipeline();
         let mut screen = PipelineDetailScreen::new(pipeline);
 
+        // Add test jobs with mixed statuses
+        use crate::api::models::Job;
+        use chrono::Utc;
+        let jobs = vec![
+            Job {
+                id: "job1".to_string(),
+                name: "build".to_string(),
+                status: "success".to_string(),
+                job_number: 1,
+                started_at: Some(Utc::now()),
+                stopped_at: Some(Utc::now()),
+            },
+            Job {
+                id: "job2".to_string(),
+                name: "test".to_string(),
+                status: "failed".to_string(),
+                job_number: 2,
+                started_at: Some(Utc::now()),
+                stopped_at: Some(Utc::now()),
+            },
+        ];
+        screen.set_jobs(jobs);
+
         screen.show_only_failed = true;
         let filtered = screen.get_filtered_jobs();
 
@@ -1184,6 +1278,37 @@ mod tests {
     fn test_status_filters() {
         let pipeline = create_test_pipeline();
         let mut screen = PipelineDetailScreen::new(pipeline);
+
+        // Add test jobs with various statuses
+        use crate::api::models::Job;
+        use chrono::Utc;
+        let jobs = vec![
+            Job {
+                id: "job1".to_string(),
+                name: "build".to_string(),
+                status: "success".to_string(),
+                job_number: 1,
+                started_at: Some(Utc::now()),
+                stopped_at: Some(Utc::now()),
+            },
+            Job {
+                id: "job2".to_string(),
+                name: "test".to_string(),
+                status: "failed".to_string(),
+                job_number: 2,
+                started_at: Some(Utc::now()),
+                stopped_at: Some(Utc::now()),
+            },
+            Job {
+                id: "job3".to_string(),
+                name: "deploy".to_string(),
+                status: "running".to_string(),
+                job_number: 3,
+                started_at: Some(Utc::now()),
+                stopped_at: None,
+            },
+        ];
+        screen.set_jobs(jobs);
 
         // Test filtering by specific status
         screen.filter_success = false;

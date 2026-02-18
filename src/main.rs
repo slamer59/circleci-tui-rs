@@ -41,6 +41,26 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
             }
         }
 
+        // Check if we need to load workflows
+        if let Some(pipeline_id) = app.should_load_workflows() {
+            // Clear the pending flag
+            app.pending_workflow_load = None;
+            // Load workflows
+            if let Err(e) = app.load_workflows(&pipeline_id).await {
+                eprintln!("Error loading workflows: {}", e);
+            }
+        }
+
+        // Check if we need to load jobs
+        if let Some(workflow_id) = app.should_load_jobs() {
+            // Clear the pending flag
+            app.pending_job_load = None;
+            // Load jobs
+            if let Err(e) = app.load_jobs(&workflow_id).await {
+                eprintln!("Error loading jobs: {}", e);
+            }
+        }
+
         // Handle input events with a timeout
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
