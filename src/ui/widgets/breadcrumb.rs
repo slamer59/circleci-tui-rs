@@ -31,20 +31,20 @@ mod tests {
 
     #[test]
     fn test_render_breadcrumb_single() {
-        let breadcrumb = render_breadcrumb(&["Home"]);
+        let _breadcrumb = render_breadcrumb(&["Home"]);
         // Test that it creates a valid Paragraph
         // We can't directly test the content without rendering, but we can ensure it doesn't panic
     }
 
     #[test]
     fn test_render_breadcrumb_multiple() {
-        let breadcrumb = render_breadcrumb(&["Home", "Pipelines", "main"]);
+        let _breadcrumb = render_breadcrumb(&["Home", "Pipelines", "main"]);
         // Test that it creates a valid Paragraph
     }
 
     #[test]
     fn test_render_breadcrumb_empty() {
-        let breadcrumb = render_breadcrumb(&[]);
+        let _breadcrumb = render_breadcrumb(&[]);
         // Test that it handles empty array gracefully
     }
 }

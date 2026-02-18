@@ -2,7 +2,7 @@
 //!
 //! This module provides a modal popup for displaying API errors and other error messages.
 
-use crate::theme::{ACCENT_WARN, BG_PANEL, BORDER_FOCUSED, FAILED_TEXT, FG_BRIGHT, FG_DIM, FG_PRIMARY};
+use crate::theme::{ACCENT_WARN, BG_PANEL, FAILED_TEXT, FG_BRIGHT, FG_DIM, FG_PRIMARY};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},

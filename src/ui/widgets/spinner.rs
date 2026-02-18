@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn test_spinner_tick() {
         let mut spinner = Spinner::new("Loading...");
-        let initial_frame = spinner.current_frame;
+        let initial_frame = spinner.current_frame();
 
         // Wait for frame duration
         std::thread::sleep(FRAME_DURATION + Duration::from_millis(10));

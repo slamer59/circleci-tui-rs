@@ -37,6 +37,8 @@ pub enum PipelineDetailAction {
     None,
     /// Open job log modal for the specified job
     OpenJobLog(Job),
+    /// Open SSH modal for the specified job
+    OpenSsh(Job),
     /// Go back to pipelines screen
     Back,
     /// Load more jobs (trigger pagination)
@@ -368,6 +370,18 @@ impl PipelineDetailScreen {
                 if self.focus == PanelFocus::Workflows && !self.workflows.is_empty() {
                     let workflow = &self.workflows[self.selected_workflow_index];
                     return PipelineDetailAction::RerunWorkflow(workflow.id.clone());
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Char('s') => {
+                // Open SSH modal for selected job
+                if self.focus == PanelFocus::Jobs {
+                    if let Some(idx) = self.selected_job_index {
+                        let filtered_jobs = self.get_filtered_jobs();
+                        if let Some(job) = filtered_jobs.get(idx) {
+                            return PipelineDetailAction::OpenSsh((*job).clone());
+                        }
+                    }
                 }
                 PipelineDetailAction::None
             }
@@ -1062,6 +1076,8 @@ impl PipelineDetailScreen {
             Span::styled(" Switch  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[⏎]", Style::default().fg(ACCENT)),
             Span::styled(" View Logs  ", Style::default().fg(FG_PRIMARY)),
+            Span::styled("[s]", Style::default().fg(ACCENT)),
+            Span::styled(" SSH  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[f]", Style::default().fg(ACCENT)),
             Span::styled(" Toggle Filters  ", Style::default().fg(FG_PRIMARY)),
         ];
@@ -1160,6 +1176,7 @@ mod tests {
                 status: "success".to_string(),
                 created_at: Utc::now(),
                 stopped_at: Some(Utc::now()),
+                pipeline_id: "test-pipeline".to_string(),
             },
             Workflow {
                 id: "wf2".to_string(),
@@ -1167,6 +1184,7 @@ mod tests {
                 status: "success".to_string(),
                 created_at: Utc::now(),
                 stopped_at: Some(Utc::now()),
+                pipeline_id: "test-pipeline".to_string(),
             },
         ];
         screen.set_workflows(workflows);
@@ -1192,6 +1210,7 @@ mod tests {
                 status: "success".to_string(),
                 created_at: Utc::now(),
                 stopped_at: Some(Utc::now()),
+                pipeline_id: "test-pipeline".to_string(),
             },
             Workflow {
                 id: "wf2".to_string(),
@@ -1199,6 +1218,7 @@ mod tests {
                 status: "success".to_string(),
                 created_at: Utc::now(),
                 stopped_at: Some(Utc::now()),
+                pipeline_id: "test-pipeline".to_string(),
             },
         ];
         screen.set_workflows(workflows);
@@ -1224,16 +1244,26 @@ mod tests {
                 name: "build".to_string(),
                 status: "success".to_string(),
                 job_number: 1,
+                workflow_id: "wf1".to_string(),
                 started_at: Some(Utc::now()),
                 stopped_at: Some(Utc::now()),
+                duration: Some(60),
+                executor: crate::api::models::ExecutorInfo {
+                    executor_type: "docker".to_string(),
+                },
             },
             Job {
                 id: "job2".to_string(),
                 name: "test".to_string(),
                 status: "success".to_string(),
                 job_number: 2,
+                workflow_id: "wf1".to_string(),
                 started_at: Some(Utc::now()),
                 stopped_at: Some(Utc::now()),
+                duration: Some(60),
+                executor: crate::api::models::ExecutorInfo {
+                    executor_type: "docker".to_string(),
+                },
             },
         ];
         screen.set_jobs(jobs);
@@ -1260,21 +1290,37 @@ mod tests {
                 name: "build".to_string(),
                 status: "success".to_string(),
                 job_number: 1,
+                workflow_id: "wf1".to_string(),
                 started_at: Some(Utc::now()),
                 stopped_at: Some(Utc::now()),
+                duration: Some(60),
+                executor: crate::api::models::ExecutorInfo {
+                    executor_type: "docker".to_string(),
+                },
             },
             Job {
                 id: "job2".to_string(),
                 name: "test".to_string(),
                 status: "failed".to_string(),
                 job_number: 2,
+                workflow_id: "wf1".to_string(),
                 started_at: Some(Utc::now()),
                 stopped_at: Some(Utc::now()),
+                duration: Some(60),
+                executor: crate::api::models::ExecutorInfo {
+                    executor_type: "docker".to_string(),
+                },
             },
         ];
         screen.set_jobs(jobs);
 
-        screen.show_only_failed = true;
+        // Enable only failed filter
+        screen.filter_success = false;
+        screen.filter_running = false;
+        screen.filter_failed = true;
+        screen.filter_pending = false;
+        screen.filter_blocked = false;
+
         let filtered = screen.get_filtered_jobs();
 
         // Check that only failed jobs are returned
@@ -1295,24 +1341,39 @@ mod tests {
                 name: "build".to_string(),
                 status: "success".to_string(),
                 job_number: 1,
+                workflow_id: "wf1".to_string(),
                 started_at: Some(Utc::now()),
                 stopped_at: Some(Utc::now()),
+                duration: Some(60),
+                executor: crate::api::models::ExecutorInfo {
+                    executor_type: "docker".to_string(),
+                },
             },
             Job {
                 id: "job2".to_string(),
                 name: "test".to_string(),
                 status: "failed".to_string(),
                 job_number: 2,
+                workflow_id: "wf1".to_string(),
                 started_at: Some(Utc::now()),
                 stopped_at: Some(Utc::now()),
+                duration: Some(60),
+                executor: crate::api::models::ExecutorInfo {
+                    executor_type: "docker".to_string(),
+                },
             },
             Job {
                 id: "job3".to_string(),
                 name: "deploy".to_string(),
                 status: "running".to_string(),
                 job_number: 3,
+                workflow_id: "wf1".to_string(),
                 started_at: Some(Utc::now()),
                 stopped_at: None,
+                duration: None,
+                executor: crate::api::models::ExecutorInfo {
+                    executor_type: "docker".to_string(),
+                },
             },
         ];
         screen.set_jobs(jobs);

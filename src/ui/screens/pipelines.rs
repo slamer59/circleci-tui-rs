@@ -7,6 +7,7 @@ use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER, BORDER_FOCUSED,
     FG_BRIGHT, FG_DIM, FG_PRIMARY,
 };
+use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
 use crate::ui::widgets::spinner::Spinner;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -17,11 +18,6 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashSet;
-
-use std::time::Instant;
-
-/// Debounce delay for text filter input (milliseconds)
-const FILTER_DEBOUNCE_MS: u128 = 300;
 
 /// Pipeline screen with dense list and filters
 pub struct PipelineScreen {
@@ -35,32 +31,14 @@ pub struct PipelineScreen {
     pub selected_index: Option<usize>,
     /// Loading state
     pub loading: bool,
-    /// Text filter input
-    pub filter_text: String,
-    /// Pending filter text (before debounce)
-    pub pending_filter_text: Option<String>,
-    /// Last time filter text was changed
-    pub last_filter_change: Option<Instant>,
-    /// Branch filter (None = All)
-    pub branch_filter: Option<String>,
-    /// Status filter (None = All)
-    pub status_filter: Option<String>,
-    /// Active input focus (0 = none, 1 = text filter, 2 = branch, 3 = status)
-    pub filter_focus: u8,
-    /// Available branch options for cycling
-    pub branch_options: Vec<String>,
-    /// Current branch filter index
-    pub branch_filter_index: usize,
-    /// Status options for cycling
-    pub status_options: Vec<String>,
-    /// Current status filter index
-    pub status_filter_index: usize,
+    /// Faceted search bar for filtering
+    pub faceted_search: FacetedSearchBar,
+    /// Whether filter bar is active (for keyboard input routing)
+    pub filter_active: bool,
     /// Spinner for loading state
     pub spinner: Spinner,
     /// Refreshing indicator
     pub refreshing: bool,
-    /// Filtering indicator (shown during debounce)
-    pub is_filtering: bool,
 }
 
 impl PipelineScreen {
@@ -84,14 +62,46 @@ impl PipelineScreen {
         let mut branch_options = vec!["All".to_string()];
         branch_options.extend(branches);
 
-        // Status options
-        let status_options = vec![
-            "All".to_string(),
-            "success".to_string(),
-            "failed".to_string(),
-            "running".to_string(),
-            "pending".to_string(),
+        // Create faceted search bar with 4 facets
+        let facets = vec![
+            // Facet 0: Text filter (predefined queries)
+            Facet::new(
+                "🔍",
+                vec![
+                    "All pipelines".to_string(),
+                    "My pipelines".to_string(),
+                    "Frontend builds".to_string(),
+                    "Backend tests".to_string(),
+                ],
+                0,
+            ),
+            // Facet 1: Branch filter
+            Facet::new("⎇", branch_options.clone(), 0),
+            // Facet 2: Date filter
+            Facet::new(
+                "📅",
+                vec![
+                    "Any time".to_string(),
+                    "Last 24 hours".to_string(),
+                    "Last week".to_string(),
+                ],
+                0,
+            ),
+            // Facet 3: Status filter
+            Facet::new(
+                "●",
+                vec![
+                    "All".to_string(),
+                    "success".to_string(),
+                    "failed".to_string(),
+                    "running".to_string(),
+                    "pending".to_string(),
+                ],
+                0,
+            ),
         ];
+
+        let faceted_search = FacetedSearchBar::new(facets);
 
         Self {
             pipelines,
@@ -99,19 +109,10 @@ impl PipelineScreen {
             list_state,
             selected_index: Some(0),
             loading: false,
-            filter_text: String::new(),
-            pending_filter_text: None,
-            last_filter_change: None,
-            branch_filter: None,
-            status_filter: None,
-            filter_focus: 0,
-            branch_options,
-            branch_filter_index: 0,
-            status_options,
-            status_filter_index: 0,
+            faceted_search,
+            filter_active: false,
             spinner: Spinner::new("Loading pipelines..."),
             refreshing: false,
-            is_filtering: false,
         }
     }
 
@@ -121,58 +122,68 @@ impl PipelineScreen {
         self.apply_filters();
     }
 
-    /// Check if debounced filter should be applied and apply it
-    pub fn check_debounce(&mut self) {
-        if let Some(last_change) = self.last_filter_change {
-            if last_change.elapsed().as_millis() >= FILTER_DEBOUNCE_MS {
-                // Debounce time has passed, apply the pending filter
-                if let Some(ref pending) = self.pending_filter_text {
-                    self.filter_text = pending.clone();
-                    self.apply_filters();
-                    self.is_filtering = false;
-                }
-                self.pending_filter_text = None;
-                self.last_filter_change = None;
-            }
-        }
-    }
-
     /// Apply filters to the pipeline list
     pub fn apply_filters(&mut self) {
-        self.filtered_pipelines = self.pipelines.iter()
+        // Get filter values from faceted search bar
+        let text_filter = self.faceted_search.get_filter_value(0).unwrap_or("All pipelines");
+        let branch_filter = self.faceted_search.get_filter_value(1).unwrap_or("All");
+        let date_filter = self.faceted_search.get_filter_value(2).unwrap_or("Any time");
+        let status_filter = self.faceted_search.get_filter_value(3).unwrap_or("All");
+
+        self.filtered_pipelines = self.pipelines
+            .iter()
             .filter(|p| {
-                // Text filter (searches in commit message, branch, author)
-                let text_match = if self.filter_text.is_empty() {
-                    true
-                } else {
-                    let query = self.filter_text.to_lowercase();
-                    p.vcs.commit_subject.to_lowercase().contains(&query)
-                        || p.vcs.branch.to_lowercase().contains(&query)
-                        || p.vcs.commit_author_name.to_lowercase().contains(&query)
+                // Text filter (predefined queries)
+                let text_match = match text_filter {
+                    "All pipelines" => true,
+                    "My pipelines" => {
+                        // Mock: filter by current user (placeholder logic)
+                        p.vcs.commit_author_name.contains("Alice")
+                            || p.vcs.commit_author_name.contains("Bob")
+                    }
+                    "Frontend builds" => {
+                        // Mock: filter by branch pattern or commit message
+                        p.vcs.branch.contains("frontend")
+                            || p.vcs.commit_subject.to_lowercase().contains("frontend")
+                    }
+                    "Backend tests" => {
+                        // Mock: filter by branch pattern or commit message
+                        p.vcs.branch.contains("backend")
+                            || p.vcs.commit_subject.to_lowercase().contains("backend")
+                            || p.vcs.commit_subject.to_lowercase().contains("test")
+                    }
+                    _ => true,
                 };
 
-                // Branch filter - match exact branch or branch pattern (e.g., "feat/*")
-                let branch_match = if let Some(ref branch) = self.branch_filter {
-                    if branch.ends_with("/*") {
-                        // Pattern matching: "feat/*" matches "feat/oauth", "feat/metrics", etc.
-                        let prefix = &branch[..branch.len() - 2]; // Remove "/*"
-                        p.vcs.branch.starts_with(prefix)
-                    } else {
-                        // Exact match
-                        &p.vcs.branch == branch
-                    }
-                } else {
+                // Branch filter - match exact branch
+                let branch_match = if branch_filter == "All" {
                     true
+                } else {
+                    &p.vcs.branch == branch_filter
+                };
+
+                // Date filter (mock: not implemented yet)
+                let date_match = match date_filter {
+                    "Any time" => true,
+                    "Last 24 hours" => {
+                        // Mock: would check p.created_at against current time
+                        true
+                    }
+                    "Last week" => {
+                        // Mock: would check p.created_at against current time
+                        true
+                    }
+                    _ => true,
                 };
 
                 // Status filter
-                let status_match = if let Some(ref status) = self.status_filter {
-                    &p.state == status
-                } else {
+                let status_match = if status_filter == "All" {
                     true
+                } else {
+                    &p.state == status_filter
                 };
 
-                text_match && branch_match && status_match
+                text_match && branch_match && date_match && status_match
             })
             .cloned()
             .collect();
@@ -200,39 +211,8 @@ impl PipelineScreen {
         branches
     }
 
-    /// Cycle to the next branch filter option
-    pub fn cycle_branch_filter(&mut self) {
-        self.branch_filter_index = (self.branch_filter_index + 1) % self.branch_options.len();
-
-        if self.branch_filter_index == 0 {
-            // "All" option
-            self.branch_filter = None;
-        } else {
-            self.branch_filter = Some(self.branch_options[self.branch_filter_index].clone());
-        }
-
-        self.apply_filters();
-    }
-
-    /// Cycle to the next status filter option
-    pub fn cycle_status_filter(&mut self) {
-        self.status_filter_index = (self.status_filter_index + 1) % self.status_options.len();
-
-        if self.status_filter_index == 0 {
-            // "All" option
-            self.status_filter = None;
-        } else {
-            self.status_filter = Some(self.status_options[self.status_filter_index].clone());
-        }
-
-        self.apply_filters();
-    }
-
     /// Render the pipeline screen
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        // Check if debounced filter should be applied
-        self.check_debounce();
-
         // Reset refreshing indicator after first render
         if self.refreshing {
             self.refreshing = false;
@@ -281,71 +261,9 @@ impl PipelineScreen {
         f.render_widget(block, area);
     }
 
-    /// Render filter bar with text input, branch dropdown, status dropdown
-    fn render_filter_bar(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(BORDER))
-            .style(Style::default().bg(BG_PANEL));
-
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-
-        // Split into three columns: Filter text | Branch | Status
-        let filter_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(50), // Text filter
-                Constraint::Percentage(25), // Branch filter
-                Constraint::Percentage(25), // Status filter
-            ])
-            .split(inner);
-
-        // Text filter - show pending text if debouncing
-        let display_text = self.pending_filter_text.as_ref().unwrap_or(&self.filter_text);
-        let text_filter = if self.is_filtering && self.pending_filter_text.is_some() {
-            format!("Filter: {} (filtering...)", display_text)
-        } else {
-            format!(
-                "Filter: {}{}",
-                display_text,
-                if display_text.is_empty() { "_" } else { "" }
-            )
-        };
-        let text_style = if self.filter_focus == 1 {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(FG_PRIMARY)
-        };
-        let text_widget = Paragraph::new(text_filter).style(text_style);
-        f.render_widget(text_widget, filter_chunks[0]);
-
-        // Branch filter
-        let branch_text = format!(
-            "  Branch: [{}▼]",
-            self.branch_filter.as_deref().unwrap_or("All")
-        );
-        let branch_style = if self.filter_focus == 2 {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(FG_PRIMARY)
-        };
-        let branch_widget = Paragraph::new(branch_text).style(branch_style);
-        f.render_widget(branch_widget, filter_chunks[1]);
-
-        // Status filter
-        let status_text = format!(
-            "  Status: [{}▼]",
-            self.status_filter.as_deref().unwrap_or("All")
-        );
-        let status_style = if self.filter_focus == 3 {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(FG_PRIMARY)
-        };
-        let status_widget = Paragraph::new(status_text).style(status_style);
-        f.render_widget(status_widget, filter_chunks[2]);
+    /// Render filter bar using faceted search widget
+    fn render_filter_bar(&mut self, f: &mut Frame, area: Rect) {
+        self.faceted_search.render(f, area);
     }
 
     /// Render pipeline list with multi-line items (glim-style dense layout)
@@ -361,7 +279,7 @@ impl PipelineScreen {
             // Show loading spinner with elapsed time and cancel hint
             self.spinner.tick();
             self.spinner.set_message("Loading pipelines from CircleCI...");
-            let inner = block.inner(area);
+            let _inner = block.inner(area);
 
             let block_with_hint = Block::default()
                 .borders(Borders::ALL)
@@ -484,125 +402,101 @@ impl PipelineScreen {
 
     /// Render footer with actions
     fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let footer = Paragraph::new(Line::from(vec![
-            Span::styled("[↑↓]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Nav  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[⏎]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Open  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[Tab]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Cycle  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[Space]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Toggle  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[/]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Filter  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[r]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Refresh  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[?]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Help  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[q]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Quit", Style::default().fg(FG_PRIMARY)),
-        ]))
-        .alignment(Alignment::Center);
+        let footer = if self.filter_active {
+            // Show filter-specific shortcuts when filter is active
+            Paragraph::new(Line::from(vec![
+                Span::styled("[←→]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Switch Filter  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[↑↓]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Navigate  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[⏎]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Select  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[Esc]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Exit Filter", Style::default().fg(FG_PRIMARY)),
+            ]))
+        } else {
+            // Show normal shortcuts
+            Paragraph::new(Line::from(vec![
+                Span::styled("[↑↓]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Nav  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[⏎]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Open  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[/]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Filter  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[r]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Refresh  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[?]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Help  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled("[q]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Quit", Style::default().fg(FG_PRIMARY)),
+            ]))
+        };
 
-        f.render_widget(footer, area);
+        f.render_widget(footer.alignment(Alignment::Center), area);
     }
 
     /// Handle keyboard input
     ///
     /// Returns true if the user wants to open the selected pipeline
     pub fn handle_input(&mut self, key: KeyEvent) -> bool {
-        match key.code {
-            KeyCode::Up => {
-                self.select_previous();
-                false
-            }
-            KeyCode::Down => {
-                self.select_next();
-                false
-            }
-            KeyCode::Enter => {
-                // If branch or status filter is focused, cycle the filter
-                if self.filter_focus == 2 {
-                    self.cycle_branch_filter();
-                    false
-                } else if self.filter_focus == 3 {
-                    self.cycle_status_filter();
-                    false
-                } else {
-                    // Only open if we have a selection and not in filter mode
-                    self.filter_focus == 0 && self.selected_index.is_some()
-                }
-            }
-            KeyCode::Tab => {
-                // Cycle through filter focus: 0 → 1 → 2 → 3 → 0
-                self.filter_focus = (self.filter_focus + 1) % 4;
-                false
-            }
-            KeyCode::Char(' ') => {
-                // Space toggles branch/status filters when focused
-                if self.filter_focus == 2 {
-                    self.cycle_branch_filter();
-                    false
-                } else if self.filter_focus == 3 {
-                    self.cycle_status_filter();
-                    false
-                } else if self.filter_focus == 1 {
-                    // Space is a valid character in text filter
-                    self.filter_text.push(' ');
+        // If filter is active, delegate to faceted search widget
+        if self.filter_active {
+            match key.code {
+                KeyCode::Esc => {
+                    // Exit filter mode
+                    self.filter_active = false;
+                    // Apply filters when exiting
                     self.apply_filters();
                     false
-                } else {
+                }
+                _ => {
+                    // Let faceted search handle the key
+                    let handled = self.faceted_search.handle_key(key.code);
+                    if handled {
+                        // If faceted search handled it, reapply filters
+                        self.apply_filters();
+                    }
                     false
                 }
             }
-            KeyCode::Char('r') => {
-                // Refresh: reload mock data and reapply filters
-                self.refreshing = true;
-                self.spinner.set_message("Refreshing...");
-                self.pipelines = mock_data::mock_pipelines();
-                self.apply_filters();
-                // Note: In a real app, this would be async and we'd set refreshing to false
-                // after the API call completes. For now, it will be reset on next render.
-                false
+        } else {
+            // Normal navigation mode
+            match key.code {
+                KeyCode::Up => {
+                    self.select_previous();
+                    false
+                }
+                KeyCode::Down => {
+                    self.select_next();
+                    false
+                }
+                KeyCode::Enter => {
+                    // Only open if we have a selection
+                    self.selected_index.is_some()
+                }
+                KeyCode::Char('r') => {
+                    // Refresh: reload mock data and reapply filters
+                    self.refreshing = true;
+                    self.spinner.set_message("Refreshing...");
+                    self.pipelines = mock_data::mock_pipelines();
+                    self.apply_filters();
+                    // Note: In a real app, this would be async and we'd set refreshing to false
+                    // after the API call completes. For now, it will be reset on next render.
+                    false
+                }
+                KeyCode::Char('/') => {
+                    // Activate filter mode
+                    self.filter_active = true;
+                    false
+                }
+                KeyCode::Esc => {
+                    // Reset all filters
+                    self.faceted_search.reset_filters();
+                    self.apply_filters();
+                    false
+                }
+                _ => false,
             }
-            KeyCode::Char('/') => {
-                // Activate filter text input
-                self.filter_focus = 1;
-                false
-            }
-            KeyCode::Char(c) if self.filter_focus == 1 => {
-                // Add character to pending filter text (debounced)
-                let mut pending = self.pending_filter_text.take().unwrap_or(self.filter_text.clone());
-                pending.push(c);
-                self.pending_filter_text = Some(pending);
-                self.last_filter_change = Some(Instant::now());
-                self.is_filtering = true;
-                false
-            }
-            KeyCode::Backspace if self.filter_focus == 1 => {
-                // Remove character from pending filter text (debounced)
-                let mut pending = self.pending_filter_text.take().unwrap_or(self.filter_text.clone());
-                pending.pop();
-                self.pending_filter_text = Some(pending);
-                self.last_filter_change = Some(Instant::now());
-                self.is_filtering = true;
-                false
-            }
-            KeyCode::Esc if self.filter_focus > 0 => {
-                // Exit filter mode and reset all filters
-                self.filter_focus = 0;
-                self.filter_text.clear();
-                self.pending_filter_text = None;
-                self.last_filter_change = None;
-                self.is_filtering = false;
-                self.branch_filter = None;
-                self.branch_filter_index = 0;
-                self.status_filter = None;
-                self.status_filter_index = 0;
-                self.apply_filters();
-                false
-            }
-            _ => false,
         }
     }
 

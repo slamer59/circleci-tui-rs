@@ -34,11 +34,9 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
 
         // Check if we need to load logs (initial load for newly opened modal)
         if let Some(job_number) = app.pending_log_load {
-            eprintln!("[DEBUG] Triggering log load for job #{}", job_number);
             app.pending_log_load = None;
-            match app.load_job_logs(job_number).await {
-                Ok(_) => eprintln!("[DEBUG] Successfully loaded logs for job #{}", job_number),
-                Err(e) => eprintln!("[ERROR] Failed to load logs for job #{}: {}", job_number, e),
+            if let Err(e) = app.load_job_logs(job_number).await {
+                app.show_api_error(e);
             }
         }
 
@@ -46,8 +44,7 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
         if let Some(job_number) = app.should_refresh_logs() {
             // Spawn a task to load logs without blocking the UI
             if let Err(e) = app.load_job_logs(job_number).await {
-                // Silently ignore errors for now, could add error handling later
-                eprintln!("Error loading logs: {}", e);
+                app.show_api_error(e);
             }
         }
 
@@ -55,24 +52,30 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
         if let Some(pipeline_id) = app.should_load_workflows() {
             // Clear the pending flag
             app.pending_workflow_load = None;
-            // Load workflows
-            if let Err(e) = app.load_workflows(&pipeline_id).await {
-                eprintln!("Error loading workflows: {}", e);
-            }
+            // Load workflows (errors are handled inside load_workflows via show_api_error)
+            let _ = app.load_workflows(&pipeline_id).await;
         }
 
         // Check if we need to load jobs
         if let Some(workflow_id) = app.should_load_jobs() {
             // Clear the pending flag
             app.pending_job_load = None;
-            // Load jobs
-            if let Err(e) = app.load_jobs(&workflow_id).await {
-                eprintln!("Error loading jobs: {}", e);
+            // Load jobs (errors are handled inside load_jobs via show_api_error)
+            let _ = app.load_jobs(&workflow_id).await;
+        }
+
+        // Check if we need to load more jobs (pagination)
+        if let Some(workflow_id) = app.should_load_more_jobs() {
+            // Clear the pending flag
+            app.pending_load_more_jobs = None;
+            // Load more jobs
+            if let Err(e) = app.load_more_jobs(&workflow_id).await {
+                app.show_api_error(e);
             }
         }
 
-        // Handle input events with a timeout
-        if event::poll(Duration::from_millis(100))? {
+        // Handle input events with a timeout (50ms for smooth animations)
+        if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 // Only process key press events, not key release
                 if key.kind == KeyEventKind::Press {

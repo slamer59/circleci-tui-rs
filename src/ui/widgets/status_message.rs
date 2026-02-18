@@ -3,7 +3,7 @@
 //! This module provides a status bar that shows temporary messages at the top of the screen.
 //! Messages auto-hide after a configurable duration.
 
-use crate::theme::{ACCENT, FAILED_TEXT, FG_BRIGHT, RUNNING, SUCCESS};
+use crate::theme::{ACCENT, FAILED_TEXT, FG_BRIGHT, SUCCESS};
 use ratatui::{
     layout::Alignment,
     style::{Modifier, Style},

@@ -11,6 +11,7 @@ use crate::ui::widgets::log_modal::{LogModal, ModalAction};
 use crate::ui::widgets::confirm_modal::{ConfirmModal, ConfirmAction};
 use crate::ui::widgets::error_modal::{ErrorModal, ErrorAction};
 use crate::ui::widgets::help_modal::{HelpModal, HelpAction};
+use crate::ui::widgets::ssh_modal::{SshModal, SshAction};
 use crate::ui::widgets::status_message::StatusMessage;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
@@ -52,6 +53,8 @@ pub struct App {
     pub error_modal: Option<ErrorModal>,
     /// Help modal for keyboard shortcuts
     pub help_modal: Option<HelpModal>,
+    /// SSH modal for displaying SSH commands
+    pub ssh_modal: Option<SshModal>,
     /// Status message to display to the user (auto-hides after 5 seconds)
     pub status_message: Option<StatusMessage>,
     /// Pending workflow load (pipeline_id)
@@ -60,6 +63,8 @@ pub struct App {
     pub pending_job_load: Option<String>,
     /// Pending log load (job_number)
     pub pending_log_load: Option<u32>,
+    /// Pending load more jobs (workflow_id)
+    pub pending_load_more_jobs: Option<String>,
 }
 
 impl App {
@@ -82,11 +87,13 @@ impl App {
             confirm_modal: None,
             error_modal: None,
             help_modal: None,
+            ssh_modal: None,
             status_message: None,
             is_loading: false,
             pending_workflow_load: None,
             pending_job_load: None,
             pending_log_load: None,
+            pending_load_more_jobs: None,
         })
     }
 
@@ -185,7 +192,21 @@ impl App {
             return Ok(());
         }
 
-        // Priority 1.5: If confirmation modal is open, handle confirm input
+        // Priority 1.5: If SSH modal is open, handle SSH modal input
+        if let Some(modal) = &mut self.ssh_modal {
+            match modal.handle_input(key) {
+                SshAction::Close => {
+                    self.ssh_modal = None;
+                }
+                SshAction::None => {
+                    // Continue showing modal
+                }
+            }
+            // Modal consumes all input when open
+            return Ok(());
+        }
+
+        // Priority 1.6: If confirmation modal is open, handle confirm input
         if let Some(modal) = &mut self.confirm_modal {
             match modal.handle_input(key) {
                 ConfirmAction::Yes => {
@@ -243,10 +264,21 @@ impl App {
                         PipelineDetailAction::OpenJobLog(job) => {
                             self.open_job_log_modal(job);
                         }
+                        PipelineDetailAction::OpenSsh(job) => {
+                            self.open_ssh_modal(job);
+                        }
                         PipelineDetailAction::LoadMoreJobs => {
-                            // Note: This triggers an async load_more_jobs call
-                            // The actual loading should be handled in the main event loop
-                            // For now, this is a placeholder for the action
+                            // Trigger load more jobs for the current workflow
+                            if let Some(detail) = &self.pipeline_detail_screen {
+                                if !detail.workflows.is_empty() {
+                                    let workflow_id = detail.workflows[detail.selected_workflow_index].id.clone();
+                                    // Set loading state and trigger async load
+                                    if let Some(d) = &mut self.pipeline_detail_screen {
+                                        d.loading_more_jobs = true;
+                                    }
+                                    self.pending_load_more_jobs = Some(workflow_id);
+                                }
+                            }
                         }
                         PipelineDetailAction::LoadJobs(workflow_id) => {
                             // Trigger job loading
@@ -281,7 +313,7 @@ impl App {
 
     /// Render the current screen
     pub fn render(&mut self, f: &mut Frame) {
-        let area = f.size();
+        let area = f.area();
 
         // Check if status message expired and remove it
         if let Some(ref msg) = self.status_message {
@@ -337,6 +369,10 @@ impl App {
         if let Some(modal) = &mut self.log_modal {
             modal.render(f, area);
         }
+        // Render SSH modal on top if open
+        if let Some(modal) = &self.ssh_modal {
+            modal.render(f, area);
+        }
         // Render confirmation modal on top if open
         if let Some(modal) = &self.confirm_modal {
             modal.render(f, area);
@@ -376,6 +412,7 @@ impl App {
         self.pipeline_detail_screen = None;
         // Close any open modals when navigating back
         self.log_modal = None;
+        self.ssh_modal = None;
     }
 
     /// Open the job log modal (overlay)
@@ -396,6 +433,14 @@ impl App {
     /// Hides the job log modal overlay.
     pub fn close_log_modal(&mut self) {
         self.log_modal = None;
+    }
+
+    /// Open the SSH modal (overlay)
+    ///
+    /// Shows the SSH command for a job as a modal overlay on top of the current screen.
+    pub fn open_ssh_modal(&mut self, job: Job) {
+        eprintln!("[DEBUG] Opening SSH modal for job #{} ({})", job.job_number, job.name);
+        self.ssh_modal = Some(SshModal::new(job));
     }
 
     /// Load pipelines from the API
@@ -573,6 +618,13 @@ impl App {
         self.pending_job_load.clone()
     }
 
+    /// Check if more jobs need to be loaded (pagination)
+    ///
+    /// Returns the workflow_id if more jobs need to be loaded.
+    pub fn should_load_more_jobs(&self) -> Option<String> {
+        self.pending_load_more_jobs.clone()
+    }
+
     /// Trigger job loading for the selected workflow
     ///
     /// This is called when the user navigates between workflows.
@@ -646,24 +698,107 @@ impl App {
         let error_message = format!("{}", error);
         let error_details = format!("{:?}", error);
 
-        // Determine title based on error type
-        let title = if error_message.contains("timeout") {
-            "Timeout Error"
+        // Determine title and add helpful hints based on error type
+        let (title, user_message, hints) = if error_message.contains("timeout") {
+            (
+                "Timeout Error",
+                "The request to CircleCI API timed out",
+                vec![
+                    "Check your network connection",
+                    "CircleCI API might be experiencing issues",
+                    "Try again in a moment",
+                ],
+            )
         } else if error_message.contains("404") || error_message.contains("Not Found") {
-            "Not Found"
-        } else if error_message.contains("401") || error_message.contains("403") {
-            "Authentication Error"
-        } else if error_message.contains("connect") || error_message.contains("network") {
-            "Network Error"
+            (
+                "Not Found",
+                "The requested resource was not found",
+                vec![
+                    "Verify your project slug is correct (gh/owner/repo)",
+                    "Check that the pipeline/workflow/job still exists",
+                    "You may need to refresh the pipeline list",
+                ],
+            )
+        } else if error_message.contains("401") || error_message.contains("Unauthorized") {
+            (
+                "Authentication Error",
+                "Failed to authenticate with CircleCI API",
+                vec![
+                    "Check your CIRCLECI_TOKEN environment variable",
+                    "Verify your token is valid and not expired",
+                    "Ensure your token has the required permissions",
+                ],
+            )
+        } else if error_message.contains("403") || error_message.contains("Forbidden") {
+            (
+                "Permission Denied",
+                "You don't have permission to access this resource",
+                vec![
+                    "Verify your CircleCI token has access to this project",
+                    "Check that you're a member of the organization",
+                    "Your token may need additional permissions",
+                ],
+            )
+        } else if error_message.contains("connect") || error_message.contains("network") || error_message.contains("dns") {
+            (
+                "Network Error",
+                "Failed to connect to CircleCI API",
+                vec![
+                    "Check your internet connection",
+                    "Verify you can reach circleci.com",
+                    "Check if you're behind a proxy or firewall",
+                ],
+            )
+        } else if error_message.contains("rate limit") || error_message.contains("429") {
+            (
+                "Rate Limited",
+                "Too many requests to CircleCI API",
+                vec![
+                    "Wait a moment before trying again",
+                    "CircleCI has rate limits on API usage",
+                    "Consider reducing polling frequency",
+                ],
+            )
+        } else if error_message.contains("500") || error_message.contains("502") || error_message.contains("503") {
+            (
+                "Server Error",
+                "CircleCI API returned a server error",
+                vec![
+                    "CircleCI may be experiencing issues",
+                    "Check https://status.circleci.com/",
+                    "Try again in a few minutes",
+                ],
+            )
         } else {
-            "API Error"
+            (
+                "API Error",
+                "An error occurred while communicating with CircleCI",
+                vec![
+                    "Check the error details below for more information",
+                    "Verify your configuration is correct",
+                    "Try refreshing or restarting the application",
+                ],
+            )
         };
+
+        // Format hints as a bulleted list
+        let hints_text = hints
+            .iter()
+            .map(|hint| format!("  • {}", hint))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Combine original error with hints
+        let detailed_error = format!(
+            "{}\n\nWhat to try:\n{}\n\nTechnical details:\n{}",
+            user_message, hints_text, error_details
+        );
 
         self.error_modal = Some(
             ErrorModal::with_details(
                 title.to_string(),
-                error_message,
-                error_details,
+                user_message.to_string(),
+                detailed_error,
             )
             .with_retry(),
         );

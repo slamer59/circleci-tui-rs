@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 use std::time::Instant;
@@ -74,13 +74,19 @@ impl LogModal {
     /// Set the log lines to display
     pub fn set_logs(&mut self, logs: Vec<String>) {
         eprintln!("[DEBUG] Setting logs: {} lines", logs.len());
+        let prev_lines = self.log_lines.len();
         self.log_lines = logs;
         self.last_fetch = Instant::now();
         self.is_loading = false;
-        eprintln!("[DEBUG] is_loading set to false");
+        eprintln!("[DEBUG] is_loading set to false, prev_lines={}, new_lines={}", prev_lines, self.log_lines.len());
 
-        // Always scroll to bottom when logs first load
-        self.scroll_to_bottom();
+        // Auto-scroll to bottom if:
+        // 1. This is the initial load (prev_lines was 1 - the "Loading logs..." message)
+        // 2. Auto-scroll is enabled (job is streaming and user hasn't manually scrolled up)
+        if prev_lines <= 1 || self.auto_scroll {
+            self.scroll_to_bottom();
+            eprintln!("[DEBUG] Auto-scrolled to bottom");
+        }
     }
 
     /// Advance spinner animation frame
@@ -112,7 +118,23 @@ impl LogModal {
 
     /// Mark job as no longer streaming (completed)
     pub fn set_completed(&mut self) {
+        eprintln!("[DEBUG] Job #{} marked as completed, stopping streaming", self.job.job_number);
         self.is_streaming = false;
+        self.auto_scroll = false; // Stop auto-scrolling when job completes
+    }
+
+    /// Update the job information (useful when refreshing to check if job completed)
+    pub fn update_job(&mut self, job: Job) {
+        eprintln!("[DEBUG] Updating job #{} status: {}", job.job_number, job.status);
+        let was_streaming = self.is_streaming;
+        self.job = job.clone();
+        self.is_streaming = job.is_running();
+
+        // If job was streaming but is no longer running, mark as completed
+        if was_streaming && !self.is_streaming {
+            eprintln!("[DEBUG] Job #{} transitioned from running to {}", job.job_number, job.status);
+            self.auto_scroll = false;
+        }
     }
 
     /// Scroll to the bottom of the logs
@@ -128,10 +150,9 @@ impl LogModal {
             return;
         }
 
-        // Advance spinner animation if loading
-        if self.is_loading {
-            self.advance_spinner();
-        }
+        // Always advance spinner animation on each render for smooth animation
+        // This ensures the spinner animates both during initial load AND during streaming
+        self.advance_spinner();
 
         // Calculate the centered modal area (80% width, 80% height)
         let modal_area = centered_rect(80, 80, area);
@@ -661,10 +682,6 @@ mod tests {
         // Test rerun action
         let action = modal.handle_input(KeyEvent::from(KeyCode::Char('r')));
         assert_eq!(action, ModalAction::Rerun);
-
-        // Test SSH action
-        let action = modal.handle_input(KeyEvent::from(KeyCode::Char('s')));
-        assert_eq!(action, ModalAction::SSH);
     }
 
     #[test]
@@ -672,6 +689,17 @@ mod tests {
         let job = create_test_job();
         let mut modal = LogModal::new(job);
 
+        // Add some logs to enable scrolling
+        modal.set_logs(vec![
+            "Line 1".to_string(),
+            "Line 2".to_string(),
+            "Line 3".to_string(),
+            "Line 4".to_string(),
+            "Line 5".to_string(),
+        ]);
+
+        // set_logs auto-scrolls to bottom, so start from top
+        modal.scroll_offset = 0;
         let initial_offset = modal.scroll_offset;
 
         // Scroll down

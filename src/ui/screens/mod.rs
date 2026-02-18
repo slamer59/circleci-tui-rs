@@ -2,5 +2,5 @@
 pub mod pipeline_detail;
 pub mod pipelines;
 
-pub use pipeline_detail::{PanelFocus, PipelineDetailAction, PipelineDetailScreen};
+pub use pipeline_detail::{PipelineDetailAction, PipelineDetailScreen};
 pub use pipelines::PipelineScreen;
