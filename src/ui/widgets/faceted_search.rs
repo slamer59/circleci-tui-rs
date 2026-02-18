@@ -168,6 +168,34 @@ impl FacetedSearchBar {
         }
     }
 
+    /// Render ONLY the dropdown (if open) without rendering the filter bar.
+    ///
+    /// This is used when you want to render the dropdown separately after other content
+    /// to ensure it appears on top (proper z-ordering).
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - The frame to render to
+    /// * `filter_bar_area` - The area where the filter bar was rendered (for positioning)
+    pub fn render_dropdown_only(&self, f: &mut Frame, filter_bar_area: Rect) {
+        if self.dropdown_open {
+            self.render_dropdown(f, filter_bar_area);
+        }
+    }
+
+    /// Render ONLY the filter bar (buttons) without rendering the dropdown.
+    ///
+    /// This is used when you want to render the filter buttons first, then render other
+    /// content, and finally render the dropdown on top for proper z-ordering.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - The frame to render to
+    /// * `area` - The area to render the filter bar in (typically 3 lines tall)
+    pub fn render_filter_bar_only(&self, f: &mut Frame, area: Rect) {
+        self.render_filter_bar(f, area);
+    }
+
     /// Handle keyboard input for the faceted search bar.
     ///
     /// Returns `true` if the key was handled, `false` otherwise.
@@ -396,16 +424,23 @@ impl FacetedSearchBar {
                     .bg(Color::DarkGray)
                     .fg(theme::FG_BRIGHT)
                     .add_modifier(Modifier::BOLD)
+            } else if is_active && is_filtered {
+                // Focused + Filtered state - combine both visual cues
+                Style::default()
+                    .bg(theme::ACCENT)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_active {
+                // Focused state - with background for better visibility
+                Style::default()
+                    .bg(Color::Rgb(70, 70, 70))
+                    .fg(theme::FG_BRIGHT)
+                    .add_modifier(Modifier::BOLD)
             } else if is_filtered {
                 // Filtered state (non-default selection)
                 Style::default()
                     .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD)
-            } else if is_active {
-                // Focused state - with underline for better visibility
-                Style::default()
-                    .fg(theme::FG_BRIGHT)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 // Inactive state
                 Style::default().fg(theme::FG_DIM)
@@ -434,18 +469,8 @@ impl FacetedSearchBar {
 
         let line = Line::from(spans);
 
-        // Use focused border when dropdown is open
-        let border_style = if self.dropdown_open {
-            Style::default().fg(theme::BORDER_FOCUSED)
-        } else {
-            Style::default().fg(theme::BORDER)
-        };
-
-        let paragraph = Paragraph::new(line).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border_style),
-        );
+        // Render paragraph without borders (parent panel handles borders)
+        let paragraph = Paragraph::new(line);
         f.render_widget(paragraph, area);
     }
 

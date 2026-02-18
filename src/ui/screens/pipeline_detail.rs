@@ -537,28 +537,24 @@ impl PipelineDetailScreen {
 
     /// Render the pipeline detail screen
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        // Main layout: Header | Breadcrumb | Body | Footer
+        // Main layout: Header Panel (includes breadcrumb) | Body | Footer
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2), // Header (2 lines for pipeline info)
-                Constraint::Length(1), // Breadcrumb
+                Constraint::Length(5), // Header panel (2 header + 1 breadcrumb + 2 borders)
                 Constraint::Min(0),    // Body
                 Constraint::Length(1), // Footer
             ])
             .split(area);
 
-        // Render header
-        self.render_header(f, main_chunks[0]);
-
-        // Render breadcrumb
-        self.render_breadcrumb(f, main_chunks[1]);
+        // Render combined header panel
+        self.render_header_panel(f, main_chunks[0]);
 
         // Split body into left (workflows) and right (jobs) panels
         let body_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-            .split(main_chunks[2]);
+            .split(main_chunks[1]);
 
         // Render left panel (workflow tree)
         self.render_workflows_panel(f, body_chunks[0]);
@@ -567,11 +563,31 @@ impl PipelineDetailScreen {
         self.render_jobs_panel(f, body_chunks[1]);
 
         // Render footer
-        self.render_footer(f, main_chunks[3]);
+        self.render_footer(f, main_chunks[2]);
     }
 
-    /// Render the header with pipeline information
-    fn render_header(&self, f: &mut Frame, area: Rect) {
+    /// Render the combined header panel with pipeline information and breadcrumb
+    fn render_header_panel(&self, f: &mut Frame, area: Rect) {
+        // Create bordered block for header panel
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
+            .style(Style::default().bg(BG_PANEL));
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        // Split inner area into header (2 lines) and breadcrumb (1 line)
+        let inner_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // Header (2 lines)
+                Constraint::Length(1), // Breadcrumb (1 line)
+            ])
+            .split(inner);
+
+        // Render header content
         let project = self
             .pipeline
             .project_slug
@@ -615,34 +631,27 @@ impl PipelineDetailScreen {
         ]);
 
         let header = Paragraph::new(vec![line1, line2]);
-        f.render_widget(header, area);
-    }
+        f.render_widget(header, inner_chunks[0]);
 
-    /// Render the breadcrumb
-    fn render_breadcrumb(&self, f: &mut Frame, area: Rect) {
-        let project = self
-            .pipeline
-            .project_slug
-            .split('/')
-            .last()
-            .unwrap_or("project");
+        // Render breadcrumb
         let pipeline_num = format!("pipeline #{}", self.pipeline.number);
-
         let breadcrumb = render_breadcrumb(&[project, &pipeline_num]);
-        f.render_widget(breadcrumb, area);
+        f.render_widget(breadcrumb, inner_chunks[1]);
     }
 
     /// Render the workflows panel (left side)
     fn render_workflows_panel(&mut self, f: &mut Frame, area: Rect) {
+        let border_style = if self.focus == PanelFocus::Workflows {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(ACCENT)
+        };
+
         let block = Block::default()
             .title(" WORKFLOWS ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if self.focus == PanelFocus::Workflows {
-                BORDER_FOCUSED
-            } else {
-                BORDER
-            }))
+            .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 
         if self.loading_workflows {
@@ -739,7 +748,7 @@ impl PipelineDetailScreen {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Faceted search bar
+                Constraint::Length(4), // Faceted search bar (3 content + 1 top border, no bottom)
                 Constraint::Min(0),    // Job list
             ])
             .split(area);
@@ -758,8 +767,26 @@ impl PipelineDetailScreen {
 
     /// Render the faceted search bar (status and duration filters)
     fn render_faceted_search_bar(&mut self, f: &mut Frame, area: Rect) {
-        // Render only the filter buttons (dropdown is rendered separately for z-ordering)
-        self.faceted_search.render_filter_bar_only(f, area);
+        // Determine border style based on focus
+        let border_style = if self.focus == PanelFocus::Filters {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(ACCENT)
+        };
+
+        // Create bordered block for filter bar (no bottom border - flows into jobs panel)
+        let block = Block::default()
+            .title(" FILTERS ")
+            .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style)
+            .style(Style::default().bg(BG_PANEL));
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        // Render only the filter buttons inside the panel (dropdown is rendered separately for z-ordering)
+        self.faceted_search.render_filter_bar_only(f, inner);
     }
 
     /// Render the job list
@@ -783,15 +810,17 @@ impl PipelineDetailScreen {
             status_summary
         );
 
+        let border_style = if self.focus == PanelFocus::Jobs {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(ACCENT)
+        };
+
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if self.focus == PanelFocus::Jobs {
-                BORDER_FOCUSED
-            } else {
-                BORDER
-            }))
+            .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 
         if self.loading_jobs {

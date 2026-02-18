@@ -23,6 +23,8 @@ pub struct TextInput {
     cursor_pos: usize,
     /// Whether this input is currently focused
     focused: bool,
+    /// Configurable border sides
+    borders: Borders,
 }
 
 impl TextInput {
@@ -33,7 +35,14 @@ impl TextInput {
             placeholder: placeholder.to_string(),
             cursor_pos: 0,
             focused: false,
+            borders: Borders::ALL, // Default to all borders
         }
+    }
+
+    /// Configure which borders to display (builder pattern)
+    pub fn with_borders(mut self, borders: Borders) -> Self {
+        self.borders = borders;
+        self
     }
 
     /// Get the current value
@@ -186,10 +195,58 @@ impl TextInput {
         };
 
         let block = Block::default()
-            .borders(Borders::ALL)
+            .borders(self.borders)
             .border_style(border_style);
 
         let paragraph = Paragraph::new(text).block(block);
+        f.render_widget(paragraph, area);
+    }
+
+    /// Render the text input without borders (for use inside other panels)
+    pub fn render_plain(&self, f: &mut Frame, area: Rect) {
+        let text = if self.value.is_empty() && !self.focused {
+            // Show placeholder
+            Line::from(vec![Span::styled(
+                &self.placeholder,
+                Style::default()
+                    .fg(theme::FG_DIM)
+                    .add_modifier(Modifier::ITALIC),
+            )])
+        } else {
+            // Show actual text with cursor
+            let mut spans = vec![];
+
+            if self.focused && self.cursor_pos == 0 {
+                // Cursor at start
+                spans.push(Span::styled(
+                    "│",
+                    Style::default()
+                        .fg(theme::ACCENT)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+
+            for (idx, ch) in self.value.chars().enumerate() {
+                spans.push(Span::styled(
+                    ch.to_string(),
+                    Style::default().fg(theme::FG_BRIGHT),
+                ));
+
+                if self.focused && idx + 1 == self.cursor_pos {
+                    // Cursor after this character
+                    spans.push(Span::styled(
+                        "│",
+                        Style::default()
+                            .fg(theme::ACCENT)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+            }
+
+            Line::from(spans)
+        };
+
+        let paragraph = Paragraph::new(text);
         f.render_widget(paragraph, area);
     }
 }

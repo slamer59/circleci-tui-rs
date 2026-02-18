@@ -104,7 +104,8 @@ impl PipelineScreen {
         ];
 
         let faceted_search = FacetedSearchBar::new(facets);
-        let search_input = TextInput::new("Filter pipelines...");
+        let search_input = TextInput::new("Filter pipelines...")
+            .with_borders(Borders::TOP | Borders::LEFT | Borders::RIGHT);
 
         Self {
             pipelines,
@@ -262,13 +263,12 @@ impl PipelineScreen {
             self.refreshing = false;
         }
 
-        // Main layout: Header | Search Input | Filter Bar | List | Footer
+        // Main layout: Header | Filters Panel | List | Footer
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3), // Header with title
-                Constraint::Length(3), // Search input
-                Constraint::Length(3), // Filter bar
+                Constraint::Length(7), // Filters panel (search + spacing + filter buttons + borders)
                 Constraint::Min(0),    // Pipeline list (full width)
                 Constraint::Length(1), // Footer
             ])
@@ -277,17 +277,19 @@ impl PipelineScreen {
         // Render header with title
         self.render_header(f, main_chunks[0]);
 
-        // Render search input
-        self.render_search_input(f, main_chunks[1]);
-
-        // Render filter bar
-        self.render_filter_bar(f, main_chunks[2]);
+        // Render unified filters panel
+        self.render_filters_panel(f, main_chunks[1]);
 
         // Render pipeline list (full width, multi-line items)
-        self.render_pipeline_list(f, main_chunks[3]);
+        self.render_pipeline_list(f, main_chunks[2]);
 
         // Render footer with actions
-        self.render_footer(f, main_chunks[4]);
+        self.render_footer(f, main_chunks[3]);
+
+        // Render dropdown LAST so it overlays everything
+        if self.faceted_search.is_active() {
+            self.faceted_search.render_dropdown_only(f, main_chunks[1]);
+        }
     }
 
     /// Render the header with title
@@ -316,32 +318,63 @@ impl PipelineScreen {
             .title_style(Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD))
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(BORDER))
+            .border_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
             .style(Style::default().bg(BG_PANEL));
 
         f.render_widget(block, area);
     }
 
-    /// Render search input widget
-    fn render_search_input(&mut self, f: &mut Frame, area: Rect) {
-        // Set focus state on the text input widget based on search focus
+    /// Render unified filters panel containing search input and filter buttons
+    fn render_filters_panel(&mut self, f: &mut Frame, area: Rect) {
+        // Determine border style based on focus
+        let border_style = if self.search_focused || self.filter_active {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(ACCENT)
+        };
+
+        // Create bordered block for entire filters panel
+        let block = Block::default()
+            .title(" FILTERS ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style)
+            .style(Style::default().bg(BG_PANEL));
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        // Split inner area into search and filter sections
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Search input (1 line, no borders)
+                Constraint::Length(1), // Small spacing
+                Constraint::Length(2), // Filter buttons (2 lines to ensure visibility)
+            ])
+            .split(inner);
+
+        // Render search input without borders
         self.search_input.set_focused(self.search_focused);
+        self.search_input.render_plain(f, chunks[0]);
 
-        // Render the text input widget
-        self.search_input.render(f, area);
-    }
-
-    /// Render filter bar using faceted search widget
-    fn render_filter_bar(&mut self, f: &mut Frame, area: Rect) {
-        self.faceted_search.render(f, area);
+        // Render filter buttons without borders
+        self.faceted_search.render_filter_bar_only(f, chunks[2]);
     }
 
     /// Render pipeline list with multi-line items (glim-style dense layout)
     fn render_pipeline_list(&mut self, f: &mut Frame, area: Rect) {
+        // Determine border style - bold when list is focused (not in search/filter mode)
+        let border_style = if !self.search_focused && !self.filter_active {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(ACCENT)
+        };
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(BORDER_FOCUSED))
+            .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 
         // Check if loading or empty
@@ -549,6 +582,11 @@ impl PipelineScreen {
                 ),
                 Span::styled(" Search  ", Style::default().fg(FG_PRIMARY)),
                 Span::styled(
+                    "[f]",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" Filters  ", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
                     "[r]",
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
@@ -661,6 +699,11 @@ impl PipelineScreen {
                 KeyCode::Char('/') => {
                     // Activate search input focus
                     self.search_focused = true;
+                    false
+                }
+                KeyCode::Char('f') => {
+                    // Activate filter buttons focus
+                    self.filter_active = true;
                     false
                 }
                 KeyCode::Esc => {
