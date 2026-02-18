@@ -150,13 +150,12 @@ impl LogModal {
         let inner_area = block.inner(modal_area);
         f.render_widget(block, modal_area);
 
-        // Split the inner area into header, loading indicator, logs, and footer
+        // Split the inner area into header, logs, and footer
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),  // Header (3 lines with timestamps)
-                Constraint::Length(if self.is_loading { 1 } else { 0 }), // Loading indicator
-                Constraint::Min(0),     // Logs
+                Constraint::Min(0),     // Logs (spinner renders here when loading)
                 Constraint::Length(1),  // Footer
             ])
             .split(inner_area);
@@ -164,18 +163,11 @@ impl LogModal {
         // Render header
         self.render_header(f, chunks[0]);
 
-        // Render loading indicator if loading
-        if self.is_loading {
-            self.render_loading_indicator(f, chunks[1]);
-        }
-
-        // Render logs
-        let log_area = if self.is_loading { chunks[2] } else { chunks[1] };
-        self.render_logs(f, log_area);
+        // Render logs or loading spinner in the same area
+        self.render_logs(f, chunks[1]);
 
         // Render footer
-        let footer_area = if self.is_loading { chunks[3] } else { chunks[2] };
-        self.render_footer(f, footer_area);
+        self.render_footer(f, chunks[2]);
     }
 
     /// Render loading indicator with animated spinner
@@ -277,14 +269,28 @@ impl LogModal {
 
     /// Render the logs section with ANSI color support
     fn render_logs(&self, f: &mut Frame, area: Rect) {
+        // If loading, show spinner in the center of the log area
+        if self.is_loading {
+            let spinner = self.spinner_char();
+            let loading_line = Line::from(vec![
+                Span::styled(
+                    format!("{} ", spinner),
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("Loading logs...", Style::default().fg(FG_DIM)),
+            ]);
+
+            let loading = Paragraph::new(vec![loading_line])
+                .style(Style::default().bg(BG_DARK).fg(FG_PRIMARY));
+
+            f.render_widget(loading, area);
+            return;
+        }
+
         let visible_height = area.height as usize;
 
-        // Filter out the "Loading logs..." placeholder if loading
-        let display_lines: Vec<&String> = if self.is_loading {
-            self.log_lines.iter().filter(|line| *line != "Loading logs...").collect()
-        } else {
-            self.log_lines.iter().collect()
-        };
+        // Get all log lines (no filtering needed since loading is handled above)
+        let display_lines: Vec<&String> = self.log_lines.iter().collect();
 
         let max_scroll = display_lines.len().saturating_sub(visible_height);
         let scroll_offset = self.scroll_offset.min(max_scroll);
