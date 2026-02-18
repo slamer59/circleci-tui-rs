@@ -7,16 +7,16 @@ use crate::api::client::CircleCIClient;
 use crate::api::models::{Job, Pipeline};
 use crate::config::Config;
 use crate::ui::screens::{PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
+use crate::ui::widgets::confirm_modal::{ConfirmAction, ConfirmModal};
+use crate::ui::widgets::error_modal::{ErrorAction, ErrorModal};
+use crate::ui::widgets::help_modal::{HelpAction, HelpModal};
 use crate::ui::widgets::log_modal::{LogModal, ModalAction};
-use crate::ui::widgets::confirm_modal::{ConfirmModal, ConfirmAction};
-use crate::ui::widgets::error_modal::{ErrorModal, ErrorAction};
-use crate::ui::widgets::help_modal::{HelpModal, HelpAction};
-use crate::ui::widgets::ssh_modal::{SshModal, SshAction};
+use crate::ui::widgets::ssh_modal::{SshAction, SshModal};
 use crate::ui::widgets::status_message::StatusMessage;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use ratatui::{backend::Backend, Frame, Terminal};
 use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::{backend::Backend, Frame, Terminal};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -216,9 +216,10 @@ impl App {
                     if let Some(detail) = &mut self.pipeline_detail_screen {
                         if let Some(workflow_id) = &detail.confirm_workflow_id {
                             // Set status message - the actual API call should be made asynchronously
-                            self.status_message = Some(StatusMessage::info(
-                                format!("Rerunning workflow {}...", workflow_id)
-                            ));
+                            self.status_message = Some(StatusMessage::info(format!(
+                                "Rerunning workflow {}...",
+                                workflow_id
+                            )));
                             // Note: In a real async implementation, you would call:
                             // tokio::spawn(self.api_client.rerun_workflow(workflow_id.clone()));
                         }
@@ -271,7 +272,8 @@ impl App {
                             // Trigger load more jobs for the current workflow
                             if let Some(detail) = &self.pipeline_detail_screen {
                                 if !detail.workflows.is_empty() {
-                                    let workflow_id = detail.workflows[detail.selected_workflow_index].id.clone();
+                                    let workflow_id =
+                                        detail.workflows[detail.selected_workflow_index].id.clone();
                                     // Set loading state and trigger async load
                                     if let Some(d) = &mut self.pipeline_detail_screen {
                                         d.loading_more_jobs = true;
@@ -287,7 +289,9 @@ impl App {
                         PipelineDetailAction::RerunWorkflow(workflow_id) => {
                             // Show confirmation modal
                             if let Some(detail) = &self.pipeline_detail_screen {
-                                let workflow = detail.workflows.iter()
+                                let workflow = detail
+                                    .workflows
+                                    .iter()
                                     .find(|w| w.id == workflow_id)
                                     .cloned();
                                 if let Some(workflow) = workflow {
@@ -420,7 +424,10 @@ impl App {
     /// Shows job logs as a modal overlay on top of the current screen.
     pub fn open_job_log_modal(&mut self, job: Job) {
         let job_number = job.job_number;
-        eprintln!("[DEBUG] Opening log modal for job #{} ({})", job_number, job.name);
+        eprintln!(
+            "[DEBUG] Opening log modal for job #{} ({})",
+            job_number, job.name
+        );
         self.log_modal = Some(LogModal::new(job));
 
         // Mark this job as needing log load on next event loop iteration
@@ -439,7 +446,10 @@ impl App {
     ///
     /// Shows the SSH command for a job as a modal overlay on top of the current screen.
     pub fn open_ssh_modal(&mut self, job: Job) {
-        eprintln!("[DEBUG] Opening SSH modal for job #{} ({})", job.job_number, job.name);
+        eprintln!(
+            "[DEBUG] Opening SSH modal for job #{} ({})",
+            job.job_number, job.name
+        );
         self.ssh_modal = Some(SshModal::new(job));
     }
 
@@ -558,24 +568,28 @@ impl App {
     /// This is an async method that triggers a workflow rerun.
     pub async fn rerun_workflow(&mut self, workflow_id: &str) -> Result<()> {
         // Show loading message
-        self.status_message = Some(StatusMessage::info(format!("Rerunning workflow {}...", workflow_id)));
+        self.status_message = Some(StatusMessage::info(format!(
+            "Rerunning workflow {}...",
+            workflow_id
+        )));
 
         // Call API to rerun workflow
         match self.api_client.rerun_workflow(workflow_id).await {
             Ok(_) => {
-                self.status_message = Some(StatusMessage::success(
-                    format!("Workflow {} rerun successful!", workflow_id)
-                ));
+                self.status_message = Some(StatusMessage::success(format!(
+                    "Workflow {} rerun successful!",
+                    workflow_id
+                )));
             }
             Err(e) => {
-                self.status_message = Some(StatusMessage::error(
-                    format!("Failed to rerun workflow: {}", e)
-                ));
+                self.status_message = Some(StatusMessage::error(format!(
+                    "Failed to rerun workflow: {}",
+                    e
+                )));
             }
         }
         Ok(())
     }
-
 
     /// Load logs for a job
     ///
@@ -739,7 +753,10 @@ impl App {
                     "Your token may need additional permissions",
                 ],
             )
-        } else if error_message.contains("connect") || error_message.contains("network") || error_message.contains("dns") {
+        } else if error_message.contains("connect")
+            || error_message.contains("network")
+            || error_message.contains("dns")
+        {
             (
                 "Network Error",
                 "Failed to connect to CircleCI API",
@@ -759,7 +776,10 @@ impl App {
                     "Consider reducing polling frequency",
                 ],
             )
-        } else if error_message.contains("500") || error_message.contains("502") || error_message.contains("503") {
+        } else if error_message.contains("500")
+            || error_message.contains("502")
+            || error_message.contains("503")
+        {
             (
                 "Server Error",
                 "CircleCI API returned a server error",
@@ -795,12 +815,8 @@ impl App {
         );
 
         self.error_modal = Some(
-            ErrorModal::with_details(
-                title.to_string(),
-                user_message.to_string(),
-                detailed_error,
-            )
-            .with_retry(),
+            ErrorModal::with_details(title.to_string(), user_message.to_string(), detailed_error)
+                .with_retry(),
         );
     }
 }
@@ -878,10 +894,7 @@ mod tests {
 
         // Navigate to pipeline detail (Screen 2)
         app.navigate_to_pipeline_detail(pipeline.clone());
-        assert!(matches!(
-            app.current_screen,
-            Screen::PipelineDetail(_)
-        ));
+        assert!(matches!(app.current_screen, Screen::PipelineDetail(_)));
         assert!(app.pipeline_detail_screen.is_some());
         assert!(app.log_modal.is_none());
 
@@ -939,10 +952,7 @@ mod tests {
 
         // Navigate to Screen 2 (Pipeline Detail)
         app.navigate_to_pipeline_detail(pipeline.clone());
-        assert!(matches!(
-            app.current_screen,
-            Screen::PipelineDetail(_)
-        ));
+        assert!(matches!(app.current_screen, Screen::PipelineDetail(_)));
 
         // There are only 2 screens now, no third screen
         assert!(app.pipeline_detail_screen.is_some());

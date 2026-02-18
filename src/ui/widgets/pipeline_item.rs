@@ -27,17 +27,32 @@ pub fn render_pipeline_item<'a>(pipeline: &'a Pipeline, selected: bool) -> Vec<L
 
     let line = if selected {
         Line::from(vec![
-            Span::styled(format!("{} ", icon), Style::default().fg(status_col).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{:<50} ", commit_msg), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("[{}] ", pipeline.branch), Style::default().fg(ACCENT)),
+            Span::styled(
+                format!("{} ", icon),
+                Style::default().fg(status_col).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:<50} ", commit_msg),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("[{}] ", pipeline.branch),
+                Style::default().fg(ACCENT),
+            ),
             Span::styled(format!("{} ", short_sha), Style::default().fg(FG_DIM)),
             Span::styled(&pipeline.author, Style::default().fg(FG_DIM)),
         ])
     } else {
         Line::from(vec![
             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
-            Span::styled(format!("{:<50} ", commit_msg), Style::default().fg(FG_PRIMARY)),
-            Span::styled(format!("[{}] ", pipeline.branch), Style::default().fg(FG_DIM)),
+            Span::styled(
+                format!("{:<50} ", commit_msg),
+                Style::default().fg(FG_PRIMARY),
+            ),
+            Span::styled(
+                format!("[{}] ", pipeline.branch),
+                Style::default().fg(FG_DIM),
+            ),
             Span::styled(format!("{} ", short_sha), Style::default().fg(FG_DIM)),
             Span::styled(&pipeline.author, Style::default().fg(FG_DIM)),
         ])
@@ -62,7 +77,10 @@ mod tests {
     #[test]
     fn test_truncate_string() {
         assert_eq!(truncate_string("short", 10), "short");
-        assert_eq!(truncate_string("this is a very long string", 10), "this is...");
+        assert_eq!(
+            truncate_string("this is a very long string", 10),
+            "this is..."
+        );
     }
 
     #[test]

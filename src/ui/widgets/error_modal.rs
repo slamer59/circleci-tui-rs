@@ -158,7 +158,11 @@ impl ErrorModal {
             .border_style(Style::default().fg(ACCENT_WARN))
             .style(Style::default().bg(BG_PANEL))
             .title(format!(" {} ", self.title))
-            .title_style(Style::default().fg(FAILED_TEXT).add_modifier(Modifier::BOLD));
+            .title_style(
+                Style::default()
+                    .fg(FAILED_TEXT)
+                    .add_modifier(Modifier::BOLD),
+            );
 
         let inner_area = block.inner(modal_area);
         f.render_widget(block, modal_area);
@@ -202,7 +206,9 @@ impl ErrorModal {
             Line::from(""),
             Line::from(Span::styled(
                 "✗",
-                Style::default().fg(FAILED_TEXT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(FAILED_TEXT)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(Span::styled(
@@ -239,7 +245,12 @@ impl ErrorModal {
                 // Show hint to expand details
                 let hint = Line::from(vec![
                     Span::styled("Press ", Style::default().fg(FG_DIM)),
-                    Span::styled("[d]", Style::default().fg(ACCENT_WARN).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "[d]",
+                        Style::default()
+                            .fg(ACCENT_WARN)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" to show details", Style::default().fg(FG_DIM)),
                 ]);
 
@@ -257,22 +268,38 @@ impl ErrorModal {
         if self.can_retry {
             button_spans.extend(vec![
                 Span::styled("[", Style::default().fg(FG_PRIMARY)),
-                Span::styled("R", Style::default().fg(ACCENT_WARN).add_modifier(Modifier::BOLD)),
-                Span::styled("etry]", Style::default().fg(ACCENT_WARN).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "R",
+                    Style::default()
+                        .fg(ACCENT_WARN)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "etry]",
+                    Style::default()
+                        .fg(ACCENT_WARN)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("  ", Style::default()),
             ]);
         }
 
         button_spans.extend(vec![
             Span::styled("[", Style::default().fg(FG_PRIMARY)),
-            Span::styled("C", Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD)),
-            Span::styled("lose]", Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "C",
+                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "lose]",
+                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+            ),
         ]);
 
         let buttons = Line::from(button_spans);
 
-        let buttons_paragraph = Paragraph::new(vec![Line::from(""), buttons])
-            .alignment(Alignment::Center);
+        let buttons_paragraph =
+            Paragraph::new(vec![Line::from(""), buttons]).alignment(Alignment::Center);
 
         f.render_widget(buttons_paragraph, area);
     }
@@ -336,8 +363,7 @@ mod tests {
 
     #[test]
     fn test_error_modal_with_retry() {
-        let modal = ErrorModal::new("Error".to_string(), "Test error".to_string())
-            .with_retry();
+        let modal = ErrorModal::new("Error".to_string(), "Test error".to_string()).with_retry();
         assert!(modal.can_retry);
     }
 
@@ -360,8 +386,7 @@ mod tests {
 
     #[test]
     fn test_error_modal_retry() {
-        let mut modal = ErrorModal::new("Error".to_string(), "Test error".to_string())
-            .with_retry();
+        let mut modal = ErrorModal::new("Error".to_string(), "Test error".to_string()).with_retry();
 
         // Test Retry action
         let action = modal.handle_input(KeyEvent::from(KeyCode::Char('r')));

@@ -124,7 +124,9 @@ impl Spinner {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(FG_DIM));
 
-        Paragraph::new(line).block(block).alignment(Alignment::Center)
+        Paragraph::new(line)
+            .block(block)
+            .alignment(Alignment::Center)
     }
 }
 

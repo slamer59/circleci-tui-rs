@@ -74,15 +74,30 @@ impl HelpModal {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
-                Span::styled("  q", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("           Quit application", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  q",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Quit application",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  ?", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("           Show/hide this help", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  ?",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Show/hide this help",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  Esc", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  Esc",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("         Go back / Cancel", Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(""),
@@ -92,16 +107,31 @@ impl HelpModal {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
-                Span::styled("  ↑/↓", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("         Move selection up/down", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  ↑/↓",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "         Move selection up/down",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  Enter", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  Enter",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("       Select / Open", Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(vec![
-                Span::styled("  Tab", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("         Switch focus / Cycle filters", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  Tab",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "         Switch focus / Cycle filters",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(""),
             // Pipeline Screen
@@ -110,20 +140,44 @@ impl HelpModal {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
-                Span::styled("  /", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("           Activate text filter", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  /",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Activate text filter",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  r", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("           Refresh pipelines", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  r",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Refresh pipelines",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  Space", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("       Toggle branch/status filter", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  Space",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "       Toggle branch/status filter",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  Backspace", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("   Delete filter character", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  Backspace",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "   Delete filter character",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(""),
             // Pipeline Detail Screen
@@ -132,23 +186,47 @@ impl HelpModal {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
-                Span::styled("  Tab", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("         Switch between workflows and jobs", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  Tab",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "         Switch between workflows and jobs",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  Enter", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  Enter",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("       View job logs", Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(vec![
-                Span::styled("  f", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("           Toggle failed jobs filter", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  f",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Toggle failed jobs filter",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  l", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("           Load more jobs (pagination)", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  l",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Load more jobs (pagination)",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  R", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  R",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("           Rerun workflow", Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(""),
@@ -158,16 +236,31 @@ impl HelpModal {
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
-                Span::styled("  Esc", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "  Esc",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("         Close modal", Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(vec![
-                Span::styled("  ↑/↓", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("         Scroll log viewer", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  ↑/↓",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "         Scroll log viewer",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("  y/n", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-                Span::styled("         Confirm/Cancel in confirmation dialog", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "  y/n",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "         Confirm/Cancel in confirmation dialog",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(""),
             Line::from(""),

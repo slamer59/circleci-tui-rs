@@ -11,3 +11,4 @@ pub mod spinner;
 pub mod ssh_modal;
 pub mod status_badge;
 pub mod status_message;
+pub mod text_input;

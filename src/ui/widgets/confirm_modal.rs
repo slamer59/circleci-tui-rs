@@ -136,8 +136,8 @@ impl ConfirmModal {
             Span::styled("o]", no_style),
         ]);
 
-        let buttons_paragraph = Paragraph::new(vec![Line::from(""), buttons])
-            .alignment(Alignment::Center);
+        let buttons_paragraph =
+            Paragraph::new(vec![Line::from(""), buttons]).alignment(Alignment::Center);
 
         f.render_widget(buttons_paragraph, area);
     }

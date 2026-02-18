@@ -156,18 +156,13 @@ impl SshModal {
         let inner = command_block.inner(area);
         f.render_widget(command_block, area);
 
-        let command_line = Line::from(vec![
-            Span::styled(
-                &self.ssh_command,
-                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
-            ),
-        ]);
+        let command_line = Line::from(vec![Span::styled(
+            &self.ssh_command,
+            Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+        )]);
 
-        let command_paragraph = Paragraph::new(vec![
-            Line::from(""),
-            command_line,
-        ])
-        .alignment(Alignment::Center);
+        let command_paragraph =
+            Paragraph::new(vec![Line::from(""), command_line]).alignment(Alignment::Center);
 
         f.render_widget(command_paragraph, inner);
     }
@@ -176,13 +171,13 @@ impl SshModal {
     fn render_hint(&self, f: &mut Frame, area: Rect) {
         let hint_lines = vec![
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Copy the command above and paste it in your terminal", Style::default().fg(FG_DIM)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Copy the command above and paste it in your terminal",
+                Style::default().fg(FG_DIM),
+            )]),
         ];
 
-        let hint_paragraph = Paragraph::new(hint_lines)
-            .alignment(Alignment::Center);
+        let hint_paragraph = Paragraph::new(hint_lines).alignment(Alignment::Center);
 
         f.render_widget(hint_paragraph, area);
     }
@@ -191,16 +186,22 @@ impl SshModal {
     fn render_buttons(&self, f: &mut Frame, area: Rect) {
         let buttons = Line::from(vec![
             Span::styled("[", Style::default().fg(FG_PRIMARY)),
-            Span::styled("C", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled("lose]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "C",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "lose]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled("  ", Style::default()),
             Span::styled("[", Style::default().fg(FG_PRIMARY)),
             Span::styled("Esc", Style::default().fg(FG_DIM)),
             Span::styled("]", Style::default().fg(FG_PRIMARY)),
         ]);
 
-        let buttons_paragraph = Paragraph::new(vec![Line::from(""), buttons])
-            .alignment(Alignment::Center);
+        let buttons_paragraph =
+            Paragraph::new(vec![Line::from(""), buttons]).alignment(Alignment::Center);
 
         f.render_widget(buttons_paragraph, area);
     }

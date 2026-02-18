@@ -72,10 +72,7 @@ impl Facet {
     /// ```
     pub fn new(icon: &'static str, options: Vec<String>, default_index: usize) -> Self {
         assert!(!options.is_empty(), "Facet must have at least one option");
-        assert!(
-            default_index < options.len(),
-            "Default index out of bounds"
-        );
+        assert!(default_index < options.len(), "Default index out of bounds");
 
         let name = options[default_index].clone();
         Self {
@@ -141,7 +138,10 @@ impl FacetedSearchBar {
     /// let search_bar = FacetedSearchBar::new(facets);
     /// ```
     pub fn new(facets: Vec<Facet>) -> Self {
-        assert!(!facets.is_empty(), "FacetedSearchBar must have at least one facet");
+        assert!(
+            !facets.is_empty(),
+            "FacetedSearchBar must have at least one facet"
+        );
 
         Self {
             facets,
@@ -174,8 +174,8 @@ impl FacetedSearchBar {
     ///
     /// # Keyboard Controls
     ///
-    /// - Left/Right: Navigate between filter buttons
-    /// - Enter: Open dropdown or confirm selection
+    /// - Left/Right/Tab: Navigate between filter buttons
+    /// - Enter/Space: Open dropdown or confirm selection
     /// - Up/Down: Navigate dropdown options (when open)
     /// - Esc: Close dropdown
     ///
@@ -194,13 +194,13 @@ impl FacetedSearchBar {
                     return true;
                 }
             }
-            KeyCode::Right => {
+            KeyCode::Right | KeyCode::Tab => {
                 if !self.dropdown_open && self.active_btn_idx < self.facets.len() - 1 {
                     self.active_btn_idx += 1;
                     return true;
                 }
             }
-            KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char(' ') => {
                 if !self.dropdown_open {
                     // Open dropdown
                     self.dropdown_open = true;
@@ -281,6 +281,106 @@ impl FacetedSearchBar {
             .collect()
     }
 
+    /// Get the count of active filters (non-default selections).
+    ///
+    /// # Returns
+    ///
+    /// Number of filters with non-default selections
+    pub fn get_active_filter_count(&self) -> usize {
+        self.facets.iter().filter(|f| f.is_filtered()).count()
+    }
+
+    /// Check if the filter bar is currently in focus (dropdown open).
+    ///
+    /// # Returns
+    ///
+    /// `true` if dropdown is open, `false` otherwise
+    pub fn is_active(&self) -> bool {
+        self.dropdown_open
+    }
+
+    /// Get the current filter state as a vector of selected indices.
+    ///
+    /// This can be used to save filter state for later restoration.
+    /// Note: Filter state is automatically persisted in the App struct's pipeline_screen,
+    /// so manual save/restore is typically not needed.
+    ///
+    /// # Returns
+    ///
+    /// Vector of selected indices for each facet
+    pub fn get_filter_state(&self) -> Vec<usize> {
+        self.facets.iter().map(|f| f.selected_index).collect()
+    }
+
+    /// Restore filter state from a previously saved state.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Vector of selected indices for each facet
+    ///
+    /// # Returns
+    ///
+    /// `true` if state was restored successfully, `false` if state length doesn't match
+    pub fn restore_filter_state(&mut self, state: &[usize]) -> bool {
+        if state.len() != self.facets.len() {
+            return false;
+        }
+
+        for (idx, &selected_idx) in state.iter().enumerate() {
+            if selected_idx < self.facets[idx].options.len() {
+                self.facets[idx].selected_index = selected_idx;
+                self.facets[idx].update_name();
+            }
+        }
+
+        true
+    }
+
+    /// Update the options for a specific facet.
+    ///
+    /// This is useful when filter options need to be updated dynamically
+    /// (e.g., branch list changes when new pipelines are loaded).
+    ///
+    /// # Arguments
+    ///
+    /// * `facet_idx` - Index of the facet to update
+    /// * `new_options` - New list of options for the facet
+    ///
+    /// # Returns
+    ///
+    /// `true` if the facet was updated, `false` if index was out of bounds
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use circleci_tui_rs::ui::widgets::faceted_search::FacetedSearchBar;
+    ///
+    /// let mut search_bar = FacetedSearchBar::new(facets);
+    /// let new_branches = vec!["All".to_string(), "main".to_string(), "dev".to_string()];
+    /// search_bar.update_facet_options(1, new_branches);
+    /// ```
+    pub fn update_facet_options(&mut self, facet_idx: usize, new_options: Vec<String>) -> bool {
+        if let Some(facet) = self.facets.get_mut(facet_idx) {
+            // Preserve the current selection if possible
+            let current_selection = facet.selected_option().to_string();
+
+            // Find the new index for the current selection, or use default
+            let new_selected_index = new_options
+                .iter()
+                .position(|opt| opt == &current_selection)
+                .unwrap_or(facet.default_index);
+
+            // Update the facet
+            facet.options = new_options;
+            facet.selected_index = new_selected_index.min(facet.options.len() - 1);
+            facet.update_name();
+
+            true
+        } else {
+            false
+        }
+    }
+
     /// Render the filter button bar
     fn render_filter_bar(&self, f: &mut Frame, area: Rect) {
         let mut spans = Vec::new();
@@ -302,10 +402,10 @@ impl FacetedSearchBar {
                     .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD)
             } else if is_active {
-                // Focused state
+                // Focused state - with underline for better visibility
                 Style::default()
                     .fg(theme::FG_BRIGHT)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 // Inactive state
                 Style::default().fg(theme::FG_DIM)
@@ -316,11 +416,35 @@ impl FacetedSearchBar {
             spans.push(Span::raw(" "));
         }
 
+        // Add active filter count indicator
+        let active_count = self.get_active_filter_count();
+        if active_count > 0 {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                format!(
+                    "({} filter{})",
+                    active_count,
+                    if active_count == 1 { "" } else { "s" }
+                ),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        }
+
         let line = Line::from(spans);
+
+        // Use focused border when dropdown is open
+        let border_style = if self.dropdown_open {
+            Style::default().fg(theme::BORDER_FOCUSED)
+        } else {
+            Style::default().fg(theme::BORDER)
+        };
+
         let paragraph = Paragraph::new(line).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::BORDER)),
+                .border_style(border_style),
         );
         f.render_widget(paragraph, area);
     }
@@ -339,12 +463,7 @@ impl FacetedSearchBar {
         }
 
         // Calculate dropdown dimensions
-        let max_option_width = facet
-            .options
-            .iter()
-            .map(|o| o.len())
-            .max()
-            .unwrap_or(10);
+        let max_option_width = facet.options.iter().map(|o| o.len()).max().unwrap_or(10);
         let dropdown_width = (max_option_width + 6) as u16; // Add padding for checkbox and margins
         let dropdown_height = (facet.options.len() as u16) + 2; // Add borders
 
@@ -353,9 +472,8 @@ impl FacetedSearchBar {
             x: x_offset,
             y: filter_bar_area.y + filter_bar_area.height,
             width: dropdown_width.min(f.area().width - x_offset),
-            height: dropdown_height.min(
-                f.area().height - filter_bar_area.y - filter_bar_area.height,
-            ),
+            height: dropdown_height
+                .min(f.area().height - filter_bar_area.y - filter_bar_area.height),
         };
 
         // Create list items with checkmarks for selected options
@@ -548,5 +666,153 @@ mod tests {
         search_bar.facets[1].update_name();
         let active = search_bar.get_active_filters();
         assert_eq!(active.len(), 2);
+    }
+
+    #[test]
+    fn test_get_active_filter_count() {
+        let facets = vec![
+            Facet::new("●", vec!["All".to_string(), "Some".to_string()], 0),
+            Facet::new("☍", vec!["Any".to_string(), "Specific".to_string()], 0),
+        ];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        assert_eq!(search_bar.get_active_filter_count(), 0);
+
+        search_bar.facets[0].selected_index = 1;
+        assert_eq!(search_bar.get_active_filter_count(), 1);
+
+        search_bar.facets[1].selected_index = 1;
+        assert_eq!(search_bar.get_active_filter_count(), 2);
+    }
+
+    #[test]
+    fn test_is_active() {
+        let facets = vec![Facet::new("●", vec!["All".to_string()], 0)];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        assert!(!search_bar.is_active());
+
+        search_bar.handle_key(KeyCode::Enter);
+        assert!(search_bar.is_active());
+
+        search_bar.handle_key(KeyCode::Esc);
+        assert!(!search_bar.is_active());
+    }
+
+    #[test]
+    fn test_tab_navigation() {
+        let facets = vec![
+            Facet::new("●", vec!["All".to_string()], 0),
+            Facet::new("☍", vec!["Any".to_string()], 0),
+        ];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        assert_eq!(search_bar.active_btn_idx, 0);
+        search_bar.handle_key(KeyCode::Tab);
+        assert_eq!(search_bar.active_btn_idx, 1);
+    }
+
+    #[test]
+    fn test_space_to_open_dropdown() {
+        let facets = vec![Facet::new(
+            "●",
+            vec!["Option 1".to_string(), "Option 2".to_string()],
+            0,
+        )];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        assert!(!search_bar.dropdown_open);
+        search_bar.handle_key(KeyCode::Char(' '));
+        assert!(search_bar.dropdown_open);
+    }
+
+    #[test]
+    fn test_update_facet_options() {
+        let facets = vec![
+            Facet::new("●", vec!["All".to_string(), "Some".to_string()], 0),
+            Facet::new("⎇", vec!["All".to_string(), "main".to_string()], 0),
+        ];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        // Select "main" branch
+        search_bar.facets[1].selected_index = 1;
+        search_bar.facets[1].update_name();
+        assert_eq!(search_bar.get_filter_value(1), Some("main"));
+
+        // Update branch options to include "dev"
+        let new_options = vec!["All".to_string(), "main".to_string(), "dev".to_string()];
+        let result = search_bar.update_facet_options(1, new_options);
+        assert!(result);
+
+        // Selection should be preserved
+        assert_eq!(search_bar.get_filter_value(1), Some("main"));
+        assert_eq!(search_bar.facets[1].options.len(), 3);
+
+        // Update to options that don't include current selection
+        let new_options = vec!["All".to_string(), "feature".to_string()];
+        search_bar.update_facet_options(1, new_options);
+
+        // Should fall back to default (index 0)
+        assert_eq!(search_bar.get_filter_value(1), Some("All"));
+    }
+
+    #[test]
+    fn test_update_facet_options_invalid_index() {
+        let facets = vec![Facet::new("●", vec!["All".to_string()], 0)];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        // Try to update a non-existent facet
+        let result = search_bar.update_facet_options(5, vec!["New".to_string()]);
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_get_filter_state() {
+        let facets = vec![
+            Facet::new("●", vec!["All".to_string(), "Some".to_string()], 0),
+            Facet::new("☍", vec!["Any".to_string(), "Specific".to_string()], 0),
+        ];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        // Default state
+        let state = search_bar.get_filter_state();
+        assert_eq!(state, vec![0, 0]);
+
+        // Change selections
+        search_bar.facets[0].selected_index = 1;
+        search_bar.facets[1].selected_index = 1;
+
+        let state = search_bar.get_filter_state();
+        assert_eq!(state, vec![1, 1]);
+    }
+
+    #[test]
+    fn test_restore_filter_state() {
+        let facets = vec![
+            Facet::new("●", vec!["All".to_string(), "Some".to_string()], 0),
+            Facet::new("☍", vec!["Any".to_string(), "Specific".to_string()], 0),
+        ];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        // Save and restore state
+        let state = vec![1, 1];
+        let result = search_bar.restore_filter_state(&state);
+        assert!(result);
+
+        assert_eq!(search_bar.facets[0].selected_index, 1);
+        assert_eq!(search_bar.facets[1].selected_index, 1);
+        assert_eq!(search_bar.get_filter_value(0), Some("Some"));
+        assert_eq!(search_bar.get_filter_value(1), Some("Specific"));
+    }
+
+    #[test]
+    fn test_restore_filter_state_invalid() {
+        let facets = vec![Facet::new("●", vec!["All".to_string()], 0)];
+        let mut search_bar = FacetedSearchBar::new(facets);
+
+        // Try to restore state with wrong length
+        let state = vec![0, 0]; // Too many items
+        let result = search_bar.restore_filter_state(&state);
+        assert!(!result);
     }
 }

@@ -1,5 +1,7 @@
 use super::error::ApiError;
-use super::models::{ExecutorInfo, Job, JobStep, Pipeline, StepAction, TriggerInfo, VcsInfo, Workflow};
+use super::models::{
+    ExecutorInfo, Job, JobStep, Pipeline, StepAction, TriggerInfo, VcsInfo, Workflow,
+};
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use serde::Deserialize;
@@ -162,11 +164,7 @@ impl CircleCIClient {
             }
 
             // Make API request
-            let response = self
-                .client
-                .get(&url)
-                .send()
-                .await?;
+            let response = self.client.get(&url).send().await?;
 
             // Check for errors
             if !response.status().is_success() {
@@ -290,7 +288,10 @@ impl CircleCIClient {
     ///
     /// # Returns
     /// Tuple of (jobs, next_page_token)
-    pub async fn get_jobs(&self, workflow_id: &str) -> Result<(Vec<Job>, Option<String>), ApiError> {
+    pub async fn get_jobs(
+        &self,
+        workflow_id: &str,
+    ) -> Result<(Vec<Job>, Option<String>), ApiError> {
         self.get_jobs_page(workflow_id, None).await
     }
 
@@ -336,14 +337,13 @@ impl CircleCIClient {
             .into_iter()
             .map(|item| {
                 // Calculate duration if both timestamps are available
-                let duration = if let (Some(started), Some(stopped)) =
-                    (item.started_at, item.stopped_at)
-                {
-                    let delta = stopped.signed_duration_since(started);
-                    Some(delta.num_seconds() as u32)
-                } else {
-                    None
-                };
+                let duration =
+                    if let (Some(started), Some(stopped)) = (item.started_at, item.stopped_at) {
+                        let delta = stopped.signed_duration_since(started);
+                        Some(delta.num_seconds() as u32)
+                    } else {
+                        None
+                    };
 
                 Job {
                     id: item.id,
@@ -355,9 +355,7 @@ impl CircleCIClient {
                     stopped_at: item.stopped_at,
                     duration,
                     executor: ExecutorInfo {
-                        executor_type: item
-                            .executor_type
-                            .unwrap_or_else(|| "unknown".to_string()),
+                        executor_type: item.executor_type.unwrap_or_else(|| "unknown".to_string()),
                     },
                 }
             })
@@ -406,7 +404,10 @@ impl CircleCIClient {
     pub async fn get_job_steps(&self, job_number: u32) -> Result<Vec<JobStep>, ApiError> {
         // Convert project slug from v2 format (gh/org/repo) to v1.1 format (github/org/repo)
         let project_v1 = self.project_slug.replace("gh/", "github/");
-        let url = format!("https://circleci.com/api/v1.1/project/{}/{}", project_v1, job_number);
+        let url = format!(
+            "https://circleci.com/api/v1.1/project/{}/{}",
+            project_v1, job_number
+        );
 
         // Make API request with the same auth token
         let response = self.client.get(&url).send().await?;
@@ -511,12 +512,16 @@ impl CircleCIClient {
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            return Err(ApiError::Http(status, "Failed to fetch log output".to_string()));
+            return Err(ApiError::Http(
+                status,
+                "Failed to fetch log output".to_string(),
+            ));
         }
 
-        let text = response.text().await.map_err(|e| {
-            ApiError::Parse(format!("Failed to read log output: {}", e))
-        })?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| ApiError::Parse(format!("Failed to read log output: {}", e)))?;
 
         // Try to parse as JSON array
         if let Ok(log_entries) = serde_json::from_str::<Vec<Value>>(&text) {
@@ -553,7 +558,9 @@ impl CircleCIClient {
 
         // Check if any action has logs
         let has_any_logs = steps.iter().any(|step| {
-            step.actions.iter().any(|action| action.output_url.is_some())
+            step.actions
+                .iter()
+                .any(|action| action.output_url.is_some())
         });
 
         if !has_any_logs {
@@ -603,7 +610,11 @@ impl CircleCIClient {
             }
         }
 
-        eprintln!("[DEBUG] Returning {} log lines for job #{}", all_logs.len(), job_number);
+        eprintln!(
+            "[DEBUG] Returning {} log lines for job #{}",
+            all_logs.len(),
+            job_number
+        );
         Ok(all_logs)
     }
 }

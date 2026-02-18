@@ -18,9 +18,10 @@ use ratatui::widgets::Paragraph;
 /// ```
 pub fn render_breadcrumb<'a>(segments: &[&'a str]) -> Paragraph<'a> {
     let breadcrumb_text = segments.join(" › ");
-    let line = Line::from(vec![
-        Span::styled(breadcrumb_text, Style::default().fg(FG_DIM)),
-    ]);
+    let line = Line::from(vec![Span::styled(
+        breadcrumb_text,
+        Style::default().fg(FG_DIM),
+    )]);
 
     Paragraph::new(line)
 }

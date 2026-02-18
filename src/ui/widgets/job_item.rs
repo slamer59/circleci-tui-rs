@@ -20,15 +20,24 @@ pub fn render_job_item<'a>(job: &'a Job, selected: bool) -> Vec<Line<'a>> {
 
     let line = if selected {
         Line::from(vec![
-            Span::styled(format!("{} ", icon), Style::default().fg(status_col).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("{:<30} ", job_name), Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{} ", icon),
+                Style::default().fg(status_col).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{:<30} ", job_name),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!("[{}] ", job.executor), Style::default().fg(ACCENT)),
             Span::styled(&job.duration, Style::default().fg(ACCENT)),
         ])
     } else {
         Line::from(vec![
             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
-            Span::styled(format!("{:<30} ", job_name), Style::default().fg(FG_PRIMARY)),
+            Span::styled(
+                format!("{:<30} ", job_name),
+                Style::default().fg(FG_PRIMARY),
+            ),
             Span::styled(format!("[{}] ", job.executor), Style::default().fg(FG_DIM)),
             Span::styled(&job.duration, Style::default().fg(FG_DIM)),
         ])
@@ -53,7 +62,10 @@ mod tests {
     #[test]
     fn test_truncate_string() {
         assert_eq!(truncate_string("short", 10), "short");
-        assert_eq!(truncate_string("this is a very long job name", 10), "this is...");
+        assert_eq!(
+            truncate_string("this is a very long job name", 10),
+            "this is..."
+        );
     }
 
     #[test]

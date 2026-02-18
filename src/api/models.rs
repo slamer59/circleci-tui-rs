@@ -398,11 +398,7 @@ pub mod mock_data {
                 } else {
                     Some(now - Duration::minutes(23) - Duration::seconds(30))
                 },
-                duration: if is_running {
-                    None
-                } else {
-                    Some(135)
-                },
+                duration: if is_running { None } else { Some(135) },
                 executor: ExecutorInfo {
                     executor_type: "docker".to_string(),
                 },

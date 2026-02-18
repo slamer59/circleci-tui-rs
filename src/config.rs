@@ -44,8 +44,9 @@ impl Config {
         let circle_token = env::var("CIRCLECI_TOKEN")
             .context("CIRCLECI_TOKEN environment variable not set. Please set it in .env file or environment.")?;
 
-        let project_slug = env::var("PROJECT_SLUG")
-            .context("PROJECT_SLUG environment variable not set. Please set it in .env file or environment.")?;
+        let project_slug = env::var("PROJECT_SLUG").context(
+            "PROJECT_SLUG environment variable not set. Please set it in .env file or environment.",
+        )?;
 
         // Validate that neither field is empty
         if circle_token.trim().is_empty() {

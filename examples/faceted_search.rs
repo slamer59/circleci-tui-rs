@@ -296,9 +296,10 @@ fn render_content(f: &mut Frame, app: &App, area: Rect) {
     let mut text = vec![];
 
     if !active_filters.is_empty() {
-        text.push(Line::from(vec![
-            Span::styled("Active filters: ", Style::default().add_modifier(Modifier::BOLD)),
-        ]));
+        text.push(Line::from(vec![Span::styled(
+            "Active filters: ",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
         for filter in active_filters {
             text.push(Line::from(vec![Span::styled(
                 format!("  • {}", filter),
@@ -347,12 +348,7 @@ fn render_dropdown(f: &mut Frame, app: &App, filter_bar_area: Rect) {
     }
 
     // Dropdown dimensions
-    let max_option_width = facet
-        .options
-        .iter()
-        .map(|o| o.len())
-        .max()
-        .unwrap_or(10);
+    let max_option_width = facet.options.iter().map(|o| o.len()).max().unwrap_or(10);
     let dropdown_width = (max_option_width + 6) as u16; // Add padding for checkbox and margins
     let dropdown_height = (facet.options.len() as u16) + 2; // Add borders
 
