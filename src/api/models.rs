@@ -56,19 +56,20 @@ impl Workflow {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Job {
     pub id: String,
     pub name: String,
     pub status: String,
     pub job_number: u32,
+    pub workflow_id: String, // job belongs to workflow
     pub started_at: Option<DateTime<Utc>>,
     pub stopped_at: Option<DateTime<Utc>>,
     pub duration: Option<u32>, // in seconds
     pub executor: ExecutorInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecutorInfo {
     #[serde(rename = "type")]
     pub executor_type: String, // docker, machine
@@ -323,6 +324,7 @@ pub mod mock_data {
                 name: "checkout".to_string(),
                 status: "success".to_string(),
                 job_number: 1,
+                workflow_id: workflow_id.to_string(),
                 started_at: Some(now - Duration::minutes(28)),
                 stopped_at: Some(now - Duration::minutes(27) - Duration::seconds(45)),
                 duration: Some(15),
@@ -335,6 +337,7 @@ pub mod mock_data {
                 name: "install-deps".to_string(),
                 status: "success".to_string(),
                 job_number: 2,
+                workflow_id: workflow_id.to_string(),
                 started_at: Some(now - Duration::minutes(27) - Duration::seconds(45)),
                 stopped_at: Some(now - Duration::minutes(26) - Duration::seconds(15)),
                 duration: Some(90),
@@ -347,6 +350,7 @@ pub mod mock_data {
                 name: "lint".to_string(),
                 status: "success".to_string(),
                 job_number: 3,
+                workflow_id: workflow_id.to_string(),
                 started_at: Some(now - Duration::minutes(26) - Duration::seconds(15)),
                 stopped_at: Some(now - Duration::minutes(25) - Duration::seconds(45)),
                 duration: Some(30),
@@ -365,6 +369,7 @@ pub mod mock_data {
                     "success".to_string()
                 },
                 job_number: 4,
+                workflow_id: workflow_id.to_string(),
                 started_at: Some(now - Duration::minutes(25) - Duration::seconds(45)),
                 stopped_at: if is_running {
                     None
@@ -391,6 +396,7 @@ pub mod mock_data {
                     "success".to_string()
                 },
                 job_number: 5,
+                workflow_id: workflow_id.to_string(),
                 started_at: if is_running || is_failed {
                     None
                 } else {
@@ -419,6 +425,7 @@ pub mod mock_data {
                     "success".to_string()
                 },
                 job_number: 6,
+                workflow_id: workflow_id.to_string(),
                 started_at: if is_running || is_failed {
                     None
                 } else {
@@ -447,6 +454,7 @@ pub mod mock_data {
                     "success".to_string()
                 },
                 job_number: 7,
+                workflow_id: workflow_id.to_string(),
                 started_at: if is_running || is_failed {
                     None
                 } else {
@@ -475,6 +483,7 @@ pub mod mock_data {
                     "success".to_string()
                 },
                 job_number: 8,
+                workflow_id: workflow_id.to_string(),
                 started_at: if is_running || is_failed {
                     None
                 } else {

@@ -1,4 +1,8 @@
-/// Workflow screen implementation - displays workflow details, jobs list, and job logs
+/// Screen 3: Shows list of jobs for selected workflow
+///
+/// This is the third screen in the hierarchy: Pipeline → Workflow → Job
+/// This screen displays the jobs within a workflow, including a DAG visualization,
+/// job status list, and detailed logs for the selected job.
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER, BORDER_FOCUSED, FG_BRIGHT,
@@ -396,7 +400,7 @@ impl WorkflowScreen {
             .split('/')
             .last()
             .unwrap_or("project");
-        let branch = &self.pipeline.vcs.branch;
+        let pipeline_num = format!("pipeline #{}", self.pipeline.number);
         let workflow = &self.workflow.name;
 
         // Calculate status counts
@@ -414,7 +418,7 @@ impl WorkflowScreen {
             }
         }
 
-        let breadcrumb_text = format!("{} › {} › {}", project, branch, workflow);
+        let breadcrumb_text = format!("{} › {} › {}", project, pipeline_num, workflow);
         let status_text = format!(
             "  ✓ {} passed  ● {} running  ✗ {} failed  ○ {} pending",
             passed, running, failed, pending
@@ -435,7 +439,7 @@ impl WorkflowScreen {
         let dag_text = self.generate_dag_text();
 
         let block = Block::default()
-            .title(" Workflow DAG ")
+            .title(" Job Workflow DAG ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(BORDER));
 
