@@ -3,7 +3,7 @@
 //! This module provides a modal popup for displaying job logs with syntax highlighting,
 //! scrolling, and interactive controls.
 
-use crate::models::Job;
+use crate::api::models::Job;
 use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BORDER_FOCUSED, BG_DARK, BG_PANEL, FG_BRIGHT,
     FG_DIM, FG_PRIMARY, FAILED_TEXT, SUCCESS,
@@ -114,11 +114,11 @@ impl LogModal {
             ]),
             Line::from(vec![
                 Span::styled("Duration: ", Style::default().fg(FG_DIM)),
-                Span::styled(&self.job.duration, Style::default().fg(FG_PRIMARY)),
+                Span::styled(self.job.duration_formatted(), Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(vec![
                 Span::styled("Executor: ", Style::default().fg(FG_DIM)),
-                Span::styled(&self.job.executor, Style::default().fg(FG_PRIMARY)),
+                Span::styled(&self.job.executor.executor_type, Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(""),
         ];
@@ -283,12 +283,12 @@ impl LogModal {
     fn generate_failed_logs(job: &Job) -> Vec<String> {
         vec![
             "[16:55:01] Pulling Docker image...".to_string(),
-            format!("[16:55:12] ✓ Image pulled: {}", job.executor),
+            format!("[16:55:12] ✓ Image pulled: {}", job.executor.executor_type),
             "[16:55:15] Setting up environment variables".to_string(),
             "[16:55:16] ✓ Environment ready".to_string(),
             "".to_string(),
             format!("[16:55:17] $ cd /home/circleci/project && {}", job.name),
-            format!("[16:55:18] Running {}...", job.step),
+            format!("[16:55:18] Running {}...", job.name),
             "".to_string(),
             "[16:57:20] ✗ Connection timeout".to_string(),
             "           at puppeteer.js:142".to_string(),
@@ -308,12 +308,12 @@ impl LogModal {
     fn generate_success_logs(job: &Job) -> Vec<String> {
         vec![
             "[14:20:01] Pulling Docker image...".to_string(),
-            format!("[14:20:08] ✓ Image pulled: {}", job.executor),
+            format!("[14:20:08] ✓ Image pulled: {}", job.executor.executor_type),
             "[14:20:10] Setting up environment variables".to_string(),
             "[14:20:11] ✓ Environment ready".to_string(),
             "".to_string(),
             format!("[14:20:12] $ cd /home/circleci/project && {}", job.name),
-            format!("[14:20:13] Running {}...", job.step),
+            format!("[14:20:13] Running {}...", job.name),
             "".to_string(),
             "[14:20:15] Installing dependencies...".to_string(),
             "[14:20:45] ✓ Dependencies installed".to_string(),
@@ -334,12 +334,12 @@ impl LogModal {
     fn generate_running_logs(job: &Job) -> Vec<String> {
         vec![
             "[18:30:01] Pulling Docker image...".to_string(),
-            format!("[18:30:07] ✓ Image pulled: {}", job.executor),
+            format!("[18:30:07] ✓ Image pulled: {}", job.executor.executor_type),
             "[18:30:09] Setting up environment variables".to_string(),
             "[18:30:10] ✓ Environment ready".to_string(),
             "".to_string(),
             format!("[18:30:11] $ cd /home/circleci/project && {}", job.name),
-            format!("[18:30:12] Running {}...", job.step),
+            format!("[18:30:12] Running {}...", job.name),
             "".to_string(),
             "[18:30:15] Installing dependencies...".to_string(),
             "[18:31:22] ✓ Dependencies installed".to_string(),
@@ -355,9 +355,8 @@ impl LogModal {
     fn generate_generic_logs(job: &Job) -> Vec<String> {
         vec![
             "[10:00:01] Preparing job environment...".to_string(),
-            format!("[10:00:05] Executor: {}", job.executor),
+            format!("[10:00:05] Executor: {}", job.executor.executor_type),
             format!("[10:00:06] Job: {}", job.name),
-            format!("[10:00:07] Step: {}", job.step),
             "".to_string(),
             "[10:00:10] Waiting for resources...".to_string(),
             "".to_string(),
@@ -400,17 +399,23 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::models::{ExecutorInfo, mock_data};
 
     fn create_test_job() -> Job {
+        use chrono::{Duration, Utc};
+
         Job {
             id: "test-job-1".to_string(),
             name: "test-job".to_string(),
             status: "failed".to_string(),
-            duration: "2m 15s".to_string(),
-            executor: "docker-medium".to_string(),
-            step: "Run tests".to_string(),
-            job_number: Some(123),
-            ssh_enabled: false,
+            job_number: 123,
+            workflow_id: "test-workflow".to_string(),
+            started_at: Some(Utc::now() - Duration::minutes(5)),
+            stopped_at: Some(Utc::now() - Duration::minutes(3)),
+            duration: Some(135),
+            executor: ExecutorInfo {
+                executor_type: "docker".to_string(),
+            },
         }
     }
 
@@ -475,15 +480,20 @@ mod tests {
 
     #[test]
     fn test_load_mock_logs_failed() {
+        use chrono::{Duration, Utc};
+
         let job = Job {
             id: "test".to_string(),
             name: "test".to_string(),
             status: "failed".to_string(),
-            duration: "1m".to_string(),
-            executor: "docker".to_string(),
-            step: "test".to_string(),
-            job_number: None,
-            ssh_enabled: false,
+            job_number: 1,
+            workflow_id: "test-workflow".to_string(),
+            started_at: Some(Utc::now() - Duration::minutes(5)),
+            stopped_at: Some(Utc::now() - Duration::minutes(3)),
+            duration: Some(60),
+            executor: ExecutorInfo {
+                executor_type: "docker".to_string(),
+            },
         };
 
         let logs = LogModal::load_mock_logs(&job);
@@ -493,15 +503,20 @@ mod tests {
 
     #[test]
     fn test_load_mock_logs_success() {
+        use chrono::{Duration, Utc};
+
         let job = Job {
             id: "test".to_string(),
             name: "test".to_string(),
             status: "success".to_string(),
-            duration: "1m".to_string(),
-            executor: "docker".to_string(),
-            step: "test".to_string(),
-            job_number: None,
-            ssh_enabled: false,
+            job_number: 1,
+            workflow_id: "test-workflow".to_string(),
+            started_at: Some(Utc::now() - Duration::minutes(5)),
+            stopped_at: Some(Utc::now() - Duration::minutes(3)),
+            duration: Some(60),
+            executor: ExecutorInfo {
+                executor_type: "docker".to_string(),
+            },
         };
 
         let logs = LogModal::load_mock_logs(&job);

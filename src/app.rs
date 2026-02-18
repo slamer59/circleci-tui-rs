@@ -5,7 +5,8 @@
 
 use crate::api::models::{Job, Pipeline};
 use crate::config::Config;
-use crate::ui::screens::PipelineScreen;
+use crate::ui::screens::{PanelFocus, PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
+use crate::ui::widgets::log_modal::{LogModal, ModalAction};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{backend::Backend, Frame, Terminal};
@@ -18,54 +19,6 @@ pub enum Screen {
     Pipelines,
     /// Screen 2: Pipeline detail screen (workflow tree + jobs list)
     PipelineDetail(Pipeline),
-}
-
-// Placeholder structs for screens that will be implemented
-// TODO: Move these to their respective screen modules once implemented
-pub struct PipelineDetailScreen {
-    pub pipeline: Pipeline,
-}
-
-impl PipelineDetailScreen {
-    pub fn new(pipeline: Pipeline) -> Self {
-        Self { pipeline }
-    }
-
-    pub fn render(&mut self, _f: &mut Frame, _area: ratatui::layout::Rect) {
-        // TODO: Implement render
-    }
-
-    pub fn handle_input(&mut self, _key: KeyEvent) -> PipelineDetailAction {
-        // TODO: Implement input handling
-        PipelineDetailAction::None
-    }
-}
-
-pub struct LogModal {
-    pub job: Job,
-}
-
-impl LogModal {
-    pub fn new(job: Job) -> Self {
-        Self { job }
-    }
-
-    pub fn render(&mut self, _f: &mut Frame, _area: ratatui::layout::Rect) {
-        // TODO: Implement modal render as overlay
-    }
-
-    pub fn handle_input(&mut self, _key: KeyEvent) -> bool {
-        // TODO: Implement input handling
-        // Returns true if modal should close
-        false
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PipelineDetailAction {
-    None,
-    Back,
-    OpenJobLog(Job),
 }
 
 /// Main application state
@@ -134,16 +87,21 @@ impl App {
 
         // Priority 1: If modal is open, handle modal input first
         if let Some(modal) = &mut self.log_modal {
-            if key.code == KeyCode::Esc {
-                // Close modal on Esc
-                self.close_log_modal();
-                return Ok(());
-            }
-
             // Handle modal-specific input
-            if modal.handle_input(key) {
-                // Modal requests close
-                self.close_log_modal();
+            match modal.handle_input(key) {
+                ModalAction::Close => {
+                    self.close_log_modal();
+                }
+                ModalAction::Rerun => {
+                    // TODO: Implement rerun functionality
+                    self.close_log_modal();
+                }
+                ModalAction::SSH => {
+                    // TODO: Implement SSH functionality
+                }
+                ModalAction::None => {
+                    // Continue showing modal
+                }
             }
 
             // Modal consumes all input when open
