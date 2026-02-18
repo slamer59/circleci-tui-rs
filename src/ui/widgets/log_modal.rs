@@ -297,8 +297,12 @@ impl LogModal {
             .take(visible_height)
             .map(|line| {
                 // Truncate line to fit within the available width
-                let truncated = if line.len() > max_width {
-                    format!("{}…", &line[..max_width.saturating_sub(1)])
+                // Use char-based truncation to avoid splitting multi-byte UTF-8 characters
+                let truncated = if line.chars().count() > max_width {
+                    let truncated_str: String = line.chars()
+                        .take(max_width.saturating_sub(1))
+                        .collect();
+                    format!("{}…", truncated_str)
                 } else {
                     line.to_string()
                 };
