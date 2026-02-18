@@ -5,9 +5,10 @@
 
 use crate::api::models::Job;
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BORDER_FOCUSED, BG_DARK, BG_PANEL, FG_BRIGHT,
-    FG_DIM, FG_PRIMARY, FAILED_TEXT, SUCCESS,
+    get_status_color, get_status_icon, ACCENT, BG_DARK, BG_PANEL, BORDER_FOCUSED, FAILED_TEXT,
+    FG_BRIGHT, FG_DIM, FG_PRIMARY, SUCCESS,
 };
+use ansi_to_tui::IntoText;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -17,7 +18,6 @@ use ratatui::{
     Frame,
 };
 use std::time::Instant;
-use ansi_to_tui::IntoText;
 
 /// Actions that can be triggered from the log modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +50,10 @@ pub struct LogModal {
     spinner_frame: usize,
     /// Whether logs are currently loading
     is_loading: bool,
+    /// Last rendered visible height (for accurate scroll calculations)
+    last_visible_height: usize,
+    /// Pending scroll to bottom on next render
+    scroll_to_bottom_pending: bool,
 }
 
 impl LogModal {
@@ -68,6 +72,8 @@ impl LogModal {
             auto_scroll: is_streaming,
             spinner_frame: 0,
             is_loading: true,
+            last_visible_height: 1, // Will be updated on first render
+            scroll_to_bottom_pending: false,
         }
     }
 
@@ -78,14 +84,19 @@ impl LogModal {
         self.log_lines = logs;
         self.last_fetch = Instant::now();
         self.is_loading = false;
-        eprintln!("[DEBUG] is_loading set to false, prev_lines={}, new_lines={}", prev_lines, self.log_lines.len());
+        eprintln!(
+            "[DEBUG] is_loading set to false, prev_lines={}, new_lines={}",
+            prev_lines,
+            self.log_lines.len()
+        );
 
         // Auto-scroll to bottom if:
         // 1. This is the initial load (prev_lines was 1 - the "Loading logs..." message)
         // 2. Auto-scroll is enabled (job is streaming and user hasn't manually scrolled up)
         if prev_lines <= 1 || self.auto_scroll {
-            self.scroll_to_bottom();
-            eprintln!("[DEBUG] Auto-scrolled to bottom");
+            // Defer scroll to next render when we know the visible height
+            self.scroll_to_bottom_pending = true;
+            eprintln!("[DEBUG] Marked for auto-scroll to bottom on next render");
         }
     }
 
@@ -118,30 +129,38 @@ impl LogModal {
 
     /// Mark job as no longer streaming (completed)
     pub fn set_completed(&mut self) {
-        eprintln!("[DEBUG] Job #{} marked as completed, stopping streaming", self.job.job_number);
+        eprintln!(
+            "[DEBUG] Job #{} marked as completed, stopping streaming",
+            self.job.job_number
+        );
         self.is_streaming = false;
         self.auto_scroll = false; // Stop auto-scrolling when job completes
     }
 
     /// Update the job information (useful when refreshing to check if job completed)
     pub fn update_job(&mut self, job: Job) {
-        eprintln!("[DEBUG] Updating job #{} status: {}", job.job_number, job.status);
+        eprintln!(
+            "[DEBUG] Updating job #{} status: {}",
+            job.job_number, job.status
+        );
         let was_streaming = self.is_streaming;
         self.job = job.clone();
         self.is_streaming = job.is_running();
 
         // If job was streaming but is no longer running, mark as completed
         if was_streaming && !self.is_streaming {
-            eprintln!("[DEBUG] Job #{} transitioned from running to {}", job.job_number, job.status);
+            eprintln!(
+                "[DEBUG] Job #{} transitioned from running to {}",
+                job.job_number, job.status
+            );
             self.auto_scroll = false;
         }
     }
 
     /// Scroll to the bottom of the logs
     fn scroll_to_bottom(&mut self) {
-        // Set scroll offset high enough to show the last lines
-        // It will be clamped to max_scroll in render_logs
-        self.scroll_offset = self.log_lines.len();
+        // Set pending flag - actual scroll happens in render_logs when we know visible height
+        self.scroll_to_bottom_pending = true;
     }
 
     /// Render the modal to the frame
@@ -175,9 +194,9 @@ impl LogModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Header (3 lines with timestamps)
-                Constraint::Min(0),     // Logs (spinner renders here when loading)
-                Constraint::Length(1),  // Footer
+                Constraint::Length(3), // Header (3 lines with timestamps)
+                Constraint::Min(0),    // Logs (spinner renders here when loading)
+                Constraint::Length(1), // Footer
             ])
             .split(inner_area);
 
@@ -187,8 +206,9 @@ impl LogModal {
         // Render logs or loading spinner in the same area
         self.render_logs(f, chunks[1]);
 
-        // Render footer
-        self.render_footer(f, chunks[2]);
+        // Render footer - pass the log area height for accurate scroll calculation
+        let log_area_height = chunks[1].height as usize;
+        self.render_footer(f, chunks[2], log_area_height);
     }
 
     /// Render loading indicator with animated spinner
@@ -202,8 +222,7 @@ impl LogModal {
             Span::styled("Loading logs...", Style::default().fg(FG_DIM)),
         ]);
 
-        let loading = Paragraph::new(vec![loading_line])
-            .style(Style::default().bg(BG_PANEL));
+        let loading = Paragraph::new(vec![loading_line]).style(Style::default().bg(BG_PANEL));
 
         f.render_widget(loading, area);
     }
@@ -249,10 +268,16 @@ impl LogModal {
         status_line_spans.extend(vec![
             Span::styled("  │  ", Style::default().fg(FG_DIM)),
             Span::styled("Duration: ", Style::default().fg(FG_DIM)),
-            Span::styled(self.job.duration_formatted(), Style::default().fg(FG_PRIMARY)),
+            Span::styled(
+                self.job.duration_formatted(),
+                Style::default().fg(FG_PRIMARY),
+            ),
             Span::styled("  │  ", Style::default().fg(FG_DIM)),
             Span::styled("Executor: ", Style::default().fg(FG_DIM)),
-            Span::styled(&self.job.executor.executor_type, Style::default().fg(FG_PRIMARY)),
+            Span::styled(
+                &self.job.executor.executor_type,
+                Style::default().fg(FG_PRIMARY),
+            ),
         ]);
 
         // Build second line with timestamps and last update
@@ -270,10 +295,7 @@ impl LogModal {
             time_line_spans.extend(vec![
                 Span::styled("  │  ", Style::default().fg(FG_DIM)),
                 Span::styled("Updated: ", Style::default().fg(FG_DIM)),
-                Span::styled(
-                    format!("{}s ago", seconds_ago),
-                    Style::default().fg(ACCENT),
-                ),
+                Span::styled(format!("{}s ago", seconds_ago), Style::default().fg(ACCENT)),
             ]);
         }
 
@@ -289,7 +311,7 @@ impl LogModal {
     }
 
     /// Render the logs section with ANSI color support
-    fn render_logs(&self, f: &mut Frame, area: Rect) {
+    fn render_logs(&mut self, f: &mut Frame, area: Rect) {
         // If loading, show spinner in the center of the log area
         if self.is_loading {
             let spinner = self.spinner_char();
@@ -310,6 +332,20 @@ impl LogModal {
 
         let visible_height = area.height as usize;
 
+        // Update last visible height for scroll calculations
+        self.last_visible_height = visible_height;
+
+        // If scroll to bottom is pending, do it now that we know the visible height
+        if self.scroll_to_bottom_pending {
+            let max_scroll = self.log_lines.len().saturating_sub(visible_height);
+            self.scroll_offset = max_scroll;
+            self.scroll_to_bottom_pending = false;
+            eprintln!(
+                "[DEBUG] Executed pending scroll to bottom: offset={}, max={}, lines={}, height={}",
+                self.scroll_offset, max_scroll, self.log_lines.len(), visible_height
+            );
+        }
+
         // Get all log lines (no filtering needed since loading is handled above)
         let display_lines: Vec<&String> = self.log_lines.iter().collect();
 
@@ -328,9 +364,8 @@ impl LogModal {
                 // Truncate line to fit within the available width
                 // Use char-based truncation to avoid splitting multi-byte UTF-8 characters
                 let truncated = if line.chars().count() > max_width {
-                    let truncated_str: String = line.chars()
-                        .take(max_width.saturating_sub(1))
-                        .collect();
+                    let truncated_str: String =
+                        line.chars().take(max_width.saturating_sub(1)).collect();
                     format!("{}…", truncated_str)
                 } else {
                     line.to_string()
@@ -345,11 +380,15 @@ impl LogModal {
                         } else {
                             // Extract spans from ansi-to-tui Line and create ratatui Line
                             let ansi_line = &text.lines[0];
-                            let spans: Vec<Span> = ansi_line.spans.iter().map(|ansi_span| {
-                                // Convert ansi-to-tui Span to ratatui Span
-                                // Just use the content - colors will be parsed but basic styling is enough
-                                Span::raw(ansi_span.content.to_string())
-                            }).collect();
+                            let spans: Vec<Span> = ansi_line
+                                .spans
+                                .iter()
+                                .map(|ansi_span| {
+                                    // Convert ansi-to-tui Span to ratatui Span
+                                    // Just use the content - colors will be parsed but basic styling is enough
+                                    Span::raw(ansi_span.content.to_string())
+                                })
+                                .collect();
                             Line::from(spans)
                         }
                     }
@@ -369,32 +408,55 @@ impl LogModal {
     }
 
     /// Render the footer with keybindings and scroll indicator
-    fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let visible_height = area.height as usize;
-        let max_scroll = self.log_lines.len().saturating_sub(visible_height);
-        let current_line = self.scroll_offset.min(max_scroll) + 1;
+    fn render_footer(&self, f: &mut Frame, area: Rect, log_area_height: usize) {
         let total_lines = self.log_lines.len();
+        let visible_height = log_area_height;
+        let max_scroll = total_lines.saturating_sub(visible_height);
+        let current_scroll = self.scroll_offset.min(max_scroll);
 
-        // Calculate scroll percentage for progress bar
-        let scroll_percent = if total_lines > 0 {
-            ((current_line as f32 / total_lines as f32) * 100.0) as u16
-        } else {
+        // Calculate first and last visible line numbers (1-indexed for display)
+        let first_line = current_scroll + 1;
+        let last_line = (current_scroll + visible_height).min(total_lines);
+
+        // Calculate scroll percentage
+        // At bottom: scroll_offset >= max_scroll → 100%
+        // At top: scroll_offset = 0 → depends on how much is visible
+        let scroll_percent = if total_lines <= visible_height {
+            // All content fits on screen
+            100
+        } else if current_scroll >= max_scroll {
+            // At the bottom
+            100
+        } else if current_scroll == 0 {
+            // At the top
             0
+        } else {
+            // In between: calculate based on scroll position
+            ((current_scroll as f32 / max_scroll as f32) * 100.0) as u16
         };
 
         let footer_text = vec![Line::from(vec![
-            Span::styled("[Esc]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[Esc]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" Close  ", Style::default().fg(FG_DIM)),
             Span::styled(
                 "[↑↓⇞⇟]",
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" Scroll  ", Style::default().fg(FG_DIM)),
-            Span::styled("[r]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[r]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" Rerun  ", Style::default().fg(FG_DIM)),
             Span::styled("│ ", Style::default().fg(FG_DIM)),
             Span::styled(
-                format!("Scroll: {}/{} lines ({}%)", current_line, total_lines, scroll_percent),
+                format!(
+                    "Lines {}-{}/{} ({}%)",
+                    first_line, last_line, total_lines, scroll_percent
+                ),
                 Style::default().fg(ACCENT),
             ),
         ])];
@@ -424,7 +486,10 @@ impl LogModal {
             || line.to_lowercase().contains("error")
             || line.to_lowercase().contains("failed")
         {
-            return Line::from(Span::styled(line.to_string(), Style::default().fg(FAILED_TEXT)));
+            return Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(FAILED_TEXT),
+            ));
         }
 
         // Timestamp lines (starting with [)
@@ -432,17 +497,17 @@ impl LogModal {
             let parts: Vec<&str> = line.splitn(2, ']').collect();
             if parts.len() == 2 {
                 return Line::from(vec![
-                    Span::styled(
-                        format!("{}]", parts[0]),
-                        Style::default().fg(FG_DIM),
-                    ),
+                    Span::styled(format!("{}]", parts[0]), Style::default().fg(FG_DIM)),
                     Span::styled(parts[1].to_string(), Style::default().fg(FG_PRIMARY)),
                 ]);
             }
         }
 
         // Default styling
-        Line::from(Span::styled(line.to_string(), Style::default().fg(FG_PRIMARY)))
+        Line::from(Span::styled(
+            line.to_string(),
+            Style::default().fg(FG_PRIMARY),
+        ))
     }
 
     /// Handle keyboard input
@@ -483,7 +548,12 @@ impl LogModal {
                 ModalAction::None
             }
             KeyCode::End => {
-                self.scroll_offset = self.log_lines.len().saturating_sub(1);
+                // Scroll to bottom using proper max scroll
+                let max_scroll = self
+                    .log_lines
+                    .len()
+                    .saturating_sub(self.last_visible_height);
+                self.scroll_offset = max_scroll;
                 // Re-enable auto-scroll when user scrolls to end
                 if self.is_streaming {
                     self.auto_scroll = true;
@@ -503,7 +573,11 @@ impl LogModal {
 
     /// Scroll down by one line
     pub fn scroll_down(&mut self) {
-        let max_scroll = self.log_lines.len().saturating_sub(1);
+        // Use last_visible_height for accurate max scroll calculation
+        let max_scroll = self
+            .log_lines
+            .len()
+            .saturating_sub(self.last_visible_height);
         if self.scroll_offset < max_scroll {
             self.scroll_offset += 1;
         }
@@ -641,7 +715,7 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::models::{ExecutorInfo, mock_data};
+    use crate::api::models::{mock_data, ExecutorInfo};
 
     fn create_test_job() -> Job {
         use chrono::{Duration, Utc};
