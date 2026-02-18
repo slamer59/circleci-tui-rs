@@ -143,6 +143,43 @@ impl CircleCIClient {
         })
     }
 
+    /// Create a new CircleCI API client with custom base URL
+    ///
+    /// This constructor is primarily intended for testing purposes,
+    /// allowing tests to point at a mock server instead of the real CircleCI API.
+    ///
+    /// # Arguments
+    /// * `token` - CircleCI API token
+    /// * `project_slug` - Project slug in format "gh/org/repo" or "bb/org/repo"
+    /// * `base_url` - Custom base URL for the API (e.g., mock server URL)
+    pub fn new_with_base_url(
+        token: String,
+        project_slug: String,
+        base_url: String,
+    ) -> Result<Self, ApiError> {
+        // Build headers
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Circle-Token",
+            HeaderValue::from_str(&token)
+                .map_err(|e| ApiError::Network(format!("Invalid token: {}", e)))?,
+        );
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+
+        // Build reqwest client with timeout
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| ApiError::Network(format!("Failed to build HTTP client: {}", e)))?;
+
+        Ok(Self {
+            client,
+            base_url,
+            project_slug,
+        })
+    }
+
     /// Fetch pipelines for the project
     ///
     /// # Arguments
@@ -551,9 +588,7 @@ impl CircleCIClient {
     /// # Returns
     /// List of formatted log lines with timestamps
     pub async fn stream_job_log(&self, job_number: u32) -> Result<Vec<String>, ApiError> {
-        eprintln!("[DEBUG] Fetching job steps for job #{}", job_number);
         let steps = self.get_job_steps(job_number).await?;
-        eprintln!("[DEBUG] Got {} steps for job #{}", steps.len(), job_number);
         let mut all_logs = Vec::new();
 
         // Check if any action has logs
@@ -609,12 +644,6 @@ impl CircleCIClient {
                 all_logs.push(String::new());
             }
         }
-
-        eprintln!(
-            "[DEBUG] Returning {} log lines for job #{}",
-            all_logs.len(),
-            job_number
-        );
         Ok(all_logs)
     }
 }

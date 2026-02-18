@@ -180,8 +180,26 @@ impl App {
                     self.close_log_modal();
                 }
                 ModalAction::Rerun => {
-                    // TODO: Implement rerun functionality
-                    self.close_log_modal();
+                    // Close log modal and trigger rerun confirmation
+                    if let Some(log_modal) = &self.log_modal {
+                        let workflow_id = log_modal.job.workflow_id.clone();
+                        self.log_modal = None;
+
+                        // Find the workflow name from the pipeline detail screen
+                        if let Some(detail) = &self.pipeline_detail_screen {
+                            if let Some(workflow) = detail.workflows.iter().find(|w| w.id == workflow_id) {
+                                // Show confirmation modal for rerunning the workflow
+                                self.confirm_modal = Some(ConfirmModal::new(format!(
+                                    "Rerun workflow: {}?",
+                                    workflow.name
+                                )));
+                                // Store the workflow_id for when user confirms
+                                if let Some(d) = &mut self.pipeline_detail_screen {
+                                    d.confirm_workflow_id = Some(workflow_id);
+                                }
+                            }
+                        }
+                    }
                 }
                 ModalAction::None => {
                     // Continue showing modal
@@ -424,15 +442,10 @@ impl App {
     /// Shows job logs as a modal overlay on top of the current screen.
     pub fn open_job_log_modal(&mut self, job: Job) {
         let job_number = job.job_number;
-        eprintln!(
-            "[DEBUG] Opening log modal for job #{} ({})",
-            job_number, job.name
-        );
         self.log_modal = Some(LogModal::new(job));
 
         // Mark this job as needing log load on next event loop iteration
         self.pending_log_load = Some(job_number);
-        eprintln!("[DEBUG] Set pending_log_load = Some({})", job_number);
     }
 
     /// Close the log modal
@@ -446,10 +459,6 @@ impl App {
     ///
     /// Shows the SSH command for a job as a modal overlay on top of the current screen.
     pub fn open_ssh_modal(&mut self, job: Job) {
-        eprintln!(
-            "[DEBUG] Opening SSH modal for job #{} ({})",
-            job.job_number, job.name
-        );
         self.ssh_modal = Some(SshModal::new(job));
     }
 

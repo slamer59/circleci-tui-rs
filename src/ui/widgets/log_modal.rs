@@ -33,7 +33,7 @@ pub enum ModalAction {
 /// Modal popup for displaying job logs
 pub struct LogModal {
     /// The job being displayed
-    job: Job,
+    pub job: Job,
     /// Log lines to display
     log_lines: Vec<String>,
     /// Current scroll offset
@@ -79,16 +79,10 @@ impl LogModal {
 
     /// Set the log lines to display
     pub fn set_logs(&mut self, logs: Vec<String>) {
-        eprintln!("[DEBUG] Setting logs: {} lines", logs.len());
         let prev_lines = self.log_lines.len();
         self.log_lines = logs;
         self.last_fetch = Instant::now();
         self.is_loading = false;
-        eprintln!(
-            "[DEBUG] is_loading set to false, prev_lines={}, new_lines={}",
-            prev_lines,
-            self.log_lines.len()
-        );
 
         // Auto-scroll to bottom if:
         // 1. This is the initial load (prev_lines was 1 - the "Loading logs..." message)
@@ -96,7 +90,6 @@ impl LogModal {
         if prev_lines <= 1 || self.auto_scroll {
             // Defer scroll to next render when we know the visible height
             self.scroll_to_bottom_pending = true;
-            eprintln!("[DEBUG] Marked for auto-scroll to bottom on next render");
         }
     }
 
@@ -129,30 +122,18 @@ impl LogModal {
 
     /// Mark job as no longer streaming (completed)
     pub fn set_completed(&mut self) {
-        eprintln!(
-            "[DEBUG] Job #{} marked as completed, stopping streaming",
-            self.job.job_number
-        );
         self.is_streaming = false;
         self.auto_scroll = false; // Stop auto-scrolling when job completes
     }
 
     /// Update the job information (useful when refreshing to check if job completed)
     pub fn update_job(&mut self, job: Job) {
-        eprintln!(
-            "[DEBUG] Updating job #{} status: {}",
-            job.job_number, job.status
-        );
         let was_streaming = self.is_streaming;
         self.job = job.clone();
         self.is_streaming = job.is_running();
 
         // If job was streaming but is no longer running, mark as completed
         if was_streaming && !self.is_streaming {
-            eprintln!(
-                "[DEBUG] Job #{} transitioned from running to {}",
-                job.job_number, job.status
-            );
             self.auto_scroll = false;
         }
     }
@@ -340,10 +321,6 @@ impl LogModal {
             let max_scroll = self.log_lines.len().saturating_sub(visible_height);
             self.scroll_offset = max_scroll;
             self.scroll_to_bottom_pending = false;
-            eprintln!(
-                "[DEBUG] Executed pending scroll to bottom: offset={}, max={}, lines={}, height={}",
-                self.scroll_offset, max_scroll, self.log_lines.len(), visible_height
-            );
         }
 
         // Get all log lines (no filtering needed since loading is handled above)

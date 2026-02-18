@@ -767,17 +767,17 @@ impl PipelineDetailScreen {
 
     /// Render the faceted search bar (status and duration filters)
     fn render_faceted_search_bar(&mut self, f: &mut Frame, area: Rect) {
-        // Determine border style based on focus
-        let border_style = if self.focus == PanelFocus::Filters {
+        // Determine border style based on focus - match pipelines.rs styling
+        let border_style = if self.focus == PanelFocus::Filters || self.faceted_search.is_active() {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(ACCENT)
         };
 
-        // Create bordered block for filter bar (no bottom border - flows into jobs panel)
+        // Create bordered block for filter bar (complete borders like pipelines.rs)
         let block = Block::default()
             .title(" FILTERS ")
-            .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+            .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
