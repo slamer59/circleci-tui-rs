@@ -116,15 +116,16 @@ impl App {
 
     /// Handle input events
     pub fn handle_event(&mut self, key: KeyEvent) -> Result<()> {
-        // Global help handler - '?' opens help modal
-        if key.code == KeyCode::Char('?') && self.help_modal.is_none() {
-            self.help_modal = Some(HelpModal::new());
+        // Global quit handler - 'q' always quits (highest priority)
+        // This allows users to quit even if modals are open or API calls are pending
+        if key.code == KeyCode::Char('q') {
+            self.should_quit = true;
             return Ok(());
         }
 
-        // Global quit handler (but not when help modal is open)
-        if key.code == KeyCode::Char('q') && self.help_modal.is_none() {
-            self.should_quit = true;
+        // Global help handler - '?' opens help modal
+        if key.code == KeyCode::Char('?') && self.help_modal.is_none() {
+            self.help_modal = Some(HelpModal::new());
             return Ok(());
         }
 
