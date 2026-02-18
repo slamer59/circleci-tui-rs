@@ -549,28 +549,24 @@ impl CircleCIClient {
         let steps = self.get_job_steps(job_number).await?;
         let mut all_logs = Vec::new();
 
-        for step in steps {
-            // Add step header
-            all_logs.push(format!("▸ {}", step.name));
-            all_logs.push(String::new());
+        for (step_idx, step) in steps.iter().enumerate() {
+            // Add separator between steps (not before first step)
+            if step_idx > 0 {
+                all_logs.push(String::new());
+            }
 
-            for action in step.actions {
-                // Add action header
-                all_logs.push(format!("  {} {}",
-                    if action.status == "success" { "✓" }
-                    else if action.status == "failed" { "✗" }
-                    else if action.status == "running" { "●" }
-                    else { "○" },
-                    action.name
-                ));
+            for action in &step.actions {
+                // Add action name as clean header (like terminal)
+                all_logs.push(action.name.clone());
 
                 // Fetch and add log output if available
                 if let Some(output_url) = &action.output_url {
                     match self.fetch_log_output(output_url).await {
                         Ok(lines) => {
+                            // Add raw log lines (no indentation)
                             for line in lines {
                                 if !line.is_empty() {
-                                    all_logs.push(format!("    {}", line));
+                                    all_logs.push(line);
                                 }
                             }
                         }
