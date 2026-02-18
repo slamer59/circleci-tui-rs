@@ -5,12 +5,12 @@
 /// - Right Panel (70%): Filtered jobs list for the selected workflow
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BG_INPUT, BG_PANEL, BLOCKED, BORDER, BORDER_FOCUSED,
-    FAILED_TEXT, FG_BRIGHT, FG_DIM, FG_PRIMARY, PENDING, RUNNING, SUCCESS,
+    get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER, BORDER_FOCUSED, FG_BRIGHT, FG_DIM,
+    FG_PRIMARY, RUNNING,
 };
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
+use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
 use crate::ui::widgets::spinner::Spinner;
-use crate::ui::widgets::text_input::TextInput;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -31,14 +31,6 @@ pub enum PanelFocus {
     Filters,
 }
 
-/// Focus state within the filter panel
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FilterFocus {
-    /// Text input box for filtering by name
-    TextInput,
-    /// Status checkboxes and duration dropdown
-    Checkboxes,
-}
 
 /// Action returned from input handling
 #[derive(Debug, Clone, PartialEq)]
@@ -73,34 +65,8 @@ pub struct PipelineDetailScreen {
     pub selected_job_index: Option<usize>,
     /// Current panel focus
     pub focus: PanelFocus,
-    /// Filter focus state (when in filter mode)
-    pub filter_focus: FilterFocus,
-    /// Job filter text input widget
-    pub job_filter_input: TextInput,
-    /// Job filter text (kept for compatibility)
-    pub job_filter: String,
-    /// Show only failed jobs (legacy)
-    pub show_only_failed: bool,
-    /// Status filter: show success jobs
-    pub filter_success: bool,
-    /// Status filter: show running jobs
-    pub filter_running: bool,
-    /// Status filter: show failed jobs
-    pub filter_failed: bool,
-    /// Status filter: show pending jobs
-    pub filter_pending: bool,
-    /// Status filter: show blocked jobs
-    pub filter_blocked: bool,
-    /// Currently selected filter checkbox index (0-4)
-    pub selected_filter_index: usize,
-    /// Duration filter option
-    pub duration_filter: String,
-    /// Duration filter dropdown options
-    pub duration_options: Vec<String>,
-    /// Currently selected duration filter index
-    pub selected_duration_index: usize,
-    /// Whether duration dropdown is open
-    pub duration_dropdown_open: bool,
+    /// Faceted search bar for status and duration filtering
+    pub faceted_search: FacetedSearchBar,
     /// List state for workflow selection
     pub workflow_list_state: ListState,
     /// List state for job selection
@@ -142,15 +108,37 @@ impl PipelineDetailScreen {
             job_list_state.select(Some(0));
         }
 
-        // Duration filter options matching Python implementation
-        let duration_options = vec![
-            "All durations".to_string(),
-            "Quick (< 1min)".to_string(),
-            "Short (1-5min)".to_string(),
-            "Medium (5-15min)".to_string(),
-            "Long (15-30min)".to_string(),
-            "Very Long (>30min)".to_string(),
+        // Create faceted search bar with Status and Duration facets
+        let facets = vec![
+            // Facet 0: Status filter
+            Facet::new(
+                "●",
+                vec![
+                    "All".to_string(),
+                    "success".to_string(),
+                    "running".to_string(),
+                    "failed".to_string(),
+                    "pending".to_string(),
+                    "blocked".to_string(),
+                ],
+                0, // Default: All
+            ),
+            // Facet 1: Duration filter
+            Facet::new(
+                "⏱",
+                vec![
+                    "All durations".to_string(),
+                    "Quick (< 1min)".to_string(),
+                    "Short (1-5min)".to_string(),
+                    "Medium (5-15min)".to_string(),
+                    "Long (15-30min)".to_string(),
+                    "Very Long (>30min)".to_string(),
+                ],
+                0, // Default: All durations
+            ),
         ];
+
+        let faceted_search = FacetedSearchBar::new(facets);
 
         Self {
             pipeline,
@@ -159,20 +147,7 @@ impl PipelineDetailScreen {
             selected_workflow_index,
             selected_job_index,
             focus: PanelFocus::Workflows,
-            filter_focus: FilterFocus::TextInput,
-            job_filter_input: TextInput::new("Filter jobs..."),
-            job_filter: String::new(),
-            show_only_failed: false,
-            filter_success: true,
-            filter_running: true,
-            filter_failed: true,
-            filter_pending: true,
-            filter_blocked: true,
-            selected_filter_index: 0,
-            duration_filter: "All durations".to_string(),
-            duration_options,
-            selected_duration_index: 0,
-            duration_dropdown_open: false,
+            faceted_search,
             workflow_list_state,
             job_list_state,
             loading_workflows: false,
@@ -251,22 +226,24 @@ impl PipelineDetailScreen {
         self.next_page_token.is_some() && !self.loading_more_jobs
     }
 
+    /// Check if logs need to be loaded for the currently selected job
+    /// Returns Some(job_number) if logs should be loaded, None otherwise
     /// Get pagination info for display
     fn get_pagination_info(&self) -> String {
         let current_count = self.jobs.len();
         let filtered_count = self.get_filtered_jobs().len();
-        let has_text_filter = !self.job_filter_input.value().is_empty();
+        let has_filter = self.faceted_search.is_filtered();
 
         if let Some(total) = self.total_jobs_count {
             // We know the exact total
-            if self.show_only_failed || has_text_filter {
+            if has_filter {
                 format!("(Showing {} of {} total jobs)", filtered_count, total)
             } else {
                 format!("(Showing {} of {})", current_count, total)
             }
         } else if self.next_page_token.is_some() {
             // More pages exist, but we don't know the total
-            if self.show_only_failed || has_text_filter {
+            if has_filter {
                 format!(
                     "(Showing {} of {}+ total jobs)",
                     filtered_count, current_count
@@ -276,7 +253,7 @@ impl PipelineDetailScreen {
             }
         } else {
             // All jobs loaded
-            if self.show_only_failed || has_text_filter {
+            if has_filter {
                 format!(
                     "(Showing {} of {} total jobs)",
                     filtered_count, current_count
@@ -306,31 +283,32 @@ impl PipelineDetailScreen {
 
     /// Get the filtered list of jobs
     fn get_filtered_jobs(&self) -> Vec<&Job> {
+        // Get filter values from faceted search bar
+        let status_filter = self.faceted_search.get_filter_value(0).unwrap_or("All");
+        let duration_filter = self
+            .faceted_search
+            .get_filter_value(1)
+            .unwrap_or("All durations");
+
         self.jobs
             .iter()
             .filter(|job| {
-                // Apply text filter from TextInput widget
-                let filter_text = self.job_filter_input.value();
-                let matches_filter = if filter_text.is_empty() {
+                // Apply status filter
+                let matches_status = if status_filter == "All" {
                     true
                 } else {
-                    job.name
-                        .to_lowercase()
-                        .contains(&filter_text.to_lowercase())
-                };
-
-                // Apply status filters
-                let matches_status = match job.status.as_str() {
-                    "success" | "passed" | "fixed" | "successful" => self.filter_success,
-                    "running" | "in_progress" | "in-progress" => self.filter_running,
-                    "failed" | "error" | "failure" => self.filter_failed,
-                    "pending" | "queued" => self.filter_pending,
-                    "blocked" | "waiting" => self.filter_blocked,
-                    _ => true, // Show unknown statuses by default
+                    match job.status.as_str() {
+                        "success" | "passed" | "fixed" | "successful" => status_filter == "success",
+                        "running" | "in_progress" | "in-progress" => status_filter == "running",
+                        "failed" | "error" | "failure" => status_filter == "failed",
+                        "pending" | "queued" => status_filter == "pending",
+                        "blocked" | "waiting" => status_filter == "blocked",
+                        _ => true, // Show unknown statuses by default
+                    }
                 };
 
                 // Apply duration filter
-                let matches_duration = match self.duration_filter.as_str() {
+                let matches_duration = match duration_filter {
                     "All durations" => true,
                     "Quick (< 1min)" => job.duration.map(|d| d < 60).unwrap_or(false),
                     "Short (1-5min)" => job.duration.map(|d| d >= 60 && d < 300).unwrap_or(false),
@@ -344,7 +322,7 @@ impl PipelineDetailScreen {
                     _ => true,
                 };
 
-                matches_filter && matches_status && matches_duration
+                matches_status && matches_duration
             })
             .collect()
     }
@@ -416,15 +394,7 @@ impl PipelineDetailScreen {
                     self.focus = PanelFocus::Jobs;
                 } else {
                     self.focus = PanelFocus::Filters;
-                    self.filter_focus = FilterFocus::TextInput;
-                    self.selected_filter_index = 0;
                 }
-                PipelineDetailAction::None
-            }
-            KeyCode::Char('/') => {
-                // Activate text input filter from anywhere
-                self.focus = PanelFocus::Filters;
-                self.filter_focus = FilterFocus::TextInput;
                 PipelineDetailAction::None
             }
             KeyCode::Char('l') => {
@@ -462,27 +432,21 @@ impl PipelineDetailScreen {
 
     /// Handle input when in filter mode
     fn handle_filter_input(&mut self, key: KeyEvent) -> PipelineDetailAction {
-        // Handle duration dropdown if it's open
-        if self.duration_dropdown_open {
-            match key.code {
-                KeyCode::Up => {
-                    if self.selected_duration_index > 0 {
-                        self.selected_duration_index -= 1;
-                    }
-                    PipelineDetailAction::None
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('f') => {
+                // Exit filter mode (or close dropdown if open)
+                if self.faceted_search.is_active() {
+                    self.faceted_search.handle_key(key.code);
+                } else {
+                    self.focus = PanelFocus::Jobs;
                 }
-                KeyCode::Down => {
-                    if self.selected_duration_index < self.duration_options.len() - 1 {
-                        self.selected_duration_index += 1;
-                    }
-                    PipelineDetailAction::None
-                }
-                KeyCode::Enter => {
-                    // Apply selected duration filter
-                    self.duration_filter =
-                        self.duration_options[self.selected_duration_index].clone();
-                    self.duration_dropdown_open = false;
-                    // Reset job selection
+                PipelineDetailAction::None
+            }
+            _ => {
+                // Let faceted search handle all other keys
+                let handled = self.faceted_search.handle_key(key.code);
+                if handled {
+                    // Reset job selection when filter changes
                     let filtered_jobs = self.get_filtered_jobs();
                     if !filtered_jobs.is_empty() {
                         self.selected_job_index = Some(0);
@@ -491,114 +455,9 @@ impl PipelineDetailScreen {
                         self.selected_job_index = None;
                         self.job_list_state.select(None);
                     }
-                    PipelineDetailAction::None
                 }
-                KeyCode::Esc => {
-                    self.duration_dropdown_open = false;
-                    PipelineDetailAction::None
-                }
-                _ => PipelineDetailAction::None,
+                PipelineDetailAction::None
             }
-        } else if self.filter_focus == FilterFocus::TextInput {
-            // Handle text input when focused
-            match key.code {
-                KeyCode::Tab | KeyCode::Down => {
-                    // Move focus to checkboxes
-                    self.filter_focus = FilterFocus::Checkboxes;
-                    self.selected_filter_index = 0;
-                    PipelineDetailAction::None
-                }
-                KeyCode::Esc | KeyCode::Char('f') => {
-                    // Exit filter mode
-                    self.focus = PanelFocus::Jobs;
-                    PipelineDetailAction::None
-                }
-                _ => {
-                    // Let TextInput handle the key
-                    let handled = self.job_filter_input.handle_key(key.code);
-
-                    // Reset job selection if filter changed
-                    if handled {
-                        let filtered_jobs = self.get_filtered_jobs();
-                        if !filtered_jobs.is_empty() {
-                            self.selected_job_index = Some(0);
-                            self.job_list_state.select(Some(0));
-                        } else {
-                            self.selected_job_index = None;
-                            self.job_list_state.select(None);
-                        }
-                    }
-
-                    PipelineDetailAction::None
-                }
-            }
-        } else {
-            // Handle checkbox/duration button navigation
-            match key.code {
-                KeyCode::Up => {
-                    // Move focus to text input
-                    self.filter_focus = FilterFocus::TextInput;
-                    PipelineDetailAction::None
-                }
-                KeyCode::Left => {
-                    if self.selected_filter_index > 0 {
-                        self.selected_filter_index -= 1;
-                    }
-                    PipelineDetailAction::None
-                }
-                KeyCode::Right | KeyCode::Tab => {
-                    // 5 checkboxes (0-4) + 1 duration dropdown (5)
-                    if self.selected_filter_index < 5 {
-                        self.selected_filter_index += 1;
-                    } else {
-                        self.selected_filter_index = 0;
-                    }
-                    PipelineDetailAction::None
-                }
-                KeyCode::Char(' ') | KeyCode::Enter => {
-                    if self.selected_filter_index == 5 {
-                        // Open duration dropdown
-                        self.duration_dropdown_open = true;
-                        // Set dropdown focus to current selection
-                        self.selected_duration_index = self
-                            .duration_options
-                            .iter()
-                            .position(|opt| opt == &self.duration_filter)
-                            .unwrap_or(0);
-                    } else {
-                        // Toggle the selected checkbox filter
-                        self.toggle_selected_filter();
-                        // Reset job selection
-                        let filtered_jobs = self.get_filtered_jobs();
-                        if !filtered_jobs.is_empty() {
-                            self.selected_job_index = Some(0);
-                            self.job_list_state.select(Some(0));
-                        } else {
-                            self.selected_job_index = None;
-                            self.job_list_state.select(None);
-                        }
-                    }
-                    PipelineDetailAction::None
-                }
-                KeyCode::Esc | KeyCode::Char('f') => {
-                    // Exit filter mode
-                    self.focus = PanelFocus::Jobs;
-                    PipelineDetailAction::None
-                }
-                _ => PipelineDetailAction::None,
-            }
-        }
-    }
-
-    /// Toggle the currently selected filter checkbox
-    fn toggle_selected_filter(&mut self) {
-        match self.selected_filter_index {
-            0 => self.filter_success = !self.filter_success,
-            1 => self.filter_running = !self.filter_running,
-            2 => self.filter_failed = !self.filter_failed,
-            3 => self.filter_pending = !self.filter_pending,
-            4 => self.filter_blocked = !self.filter_blocked,
-            _ => {}
         }
     }
 
@@ -876,218 +735,31 @@ impl PipelineDetailScreen {
 
     /// Render the jobs panel (right side)
     fn render_jobs_panel(&mut self, f: &mut Frame, area: Rect) {
-        // Split into filter bar, status filters, and job list
+        // Split into faceted search bar and job list
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Filter bar (text filter)
-                Constraint::Length(1), // Status filter checkboxes
+                Constraint::Length(3), // Faceted search bar
                 Constraint::Min(0),    // Job list
             ])
             .split(area);
 
-        // Render filter bar
-        self.render_filter_bar(f, chunks[0]);
-
-        // Render status filters
-        self.render_status_filters(f, chunks[1]);
+        // Render faceted search bar (buttons only, not dropdown)
+        self.render_faceted_search_bar(f, chunks[0]);
 
         // Render job list
-        self.render_job_list(f, chunks[2]);
-    }
+        self.render_job_list(f, chunks[1]);
 
-    /// Render the filter bar with TextInput widget
-    fn render_filter_bar(&mut self, f: &mut Frame, area: Rect) {
-        // Set focus state on the text input widget based on filter focus
-        if self.focus == PanelFocus::Filters && self.filter_focus == FilterFocus::TextInput {
-            self.job_filter_input.set_focused(true);
-        } else {
-            self.job_filter_input.set_focused(false);
-        }
-
-        // Render the text input widget
-        self.job_filter_input.render(f, area);
-    }
-
-    /// Get filter info display string
-    fn get_filter_info(&self) -> String {
-        let enabled_count = [
-            self.filter_success,
-            self.filter_running,
-            self.filter_failed,
-            self.filter_pending,
-            self.filter_blocked,
-        ]
-        .iter()
-        .filter(|&&enabled| enabled)
-        .count();
-
-        let status_info = if enabled_count == 5 {
-            "All statuses".to_string()
-        } else {
-            format!("{}/5 statuses", enabled_count)
-        };
-
-        let duration_info = if self.duration_filter == "All durations" {
-            String::new()
-        } else {
-            format!(", {}", self.duration_filter)
-        };
-
-        format!("{}{}", status_info, duration_info)
-    }
-
-    /// Render status filter checkboxes and duration dropdown
-    fn render_status_filters(&self, f: &mut Frame, area: Rect) {
-        let success_checkbox = if self.filter_success { "☑" } else { "☐" };
-        let running_checkbox = if self.filter_running { "☑" } else { "☐" };
-        let failed_checkbox = if self.filter_failed { "☑" } else { "☐" };
-        let pending_checkbox = if self.filter_pending { "☑" } else { "☐" };
-        let blocked_checkbox = if self.filter_blocked { "☑" } else { "☐" };
-
-        let in_filter_mode = self.focus == PanelFocus::Filters;
-
-        let spans = vec![
-            // Success checkbox
-            Span::styled(
-                format!("{} Success  ", success_checkbox),
-                Style::default().fg(SUCCESS).add_modifier(
-                    if in_filter_mode && self.selected_filter_index == 0 {
-                        Modifier::BOLD | Modifier::UNDERLINED
-                    } else {
-                        Modifier::empty()
-                    },
-                ),
-            ),
-            // Running checkbox
-            Span::styled(
-                format!("{} Running  ", running_checkbox),
-                Style::default().fg(RUNNING).add_modifier(
-                    if in_filter_mode && self.selected_filter_index == 1 {
-                        Modifier::BOLD | Modifier::UNDERLINED
-                    } else {
-                        Modifier::empty()
-                    },
-                ),
-            ),
-            // Failed checkbox
-            Span::styled(
-                format!("{} Failed  ", failed_checkbox),
-                Style::default().fg(FAILED_TEXT).add_modifier(
-                    if in_filter_mode && self.selected_filter_index == 2 {
-                        Modifier::BOLD | Modifier::UNDERLINED
-                    } else {
-                        Modifier::empty()
-                    },
-                ),
-            ),
-            // Pending checkbox
-            Span::styled(
-                format!("{} Pending  ", pending_checkbox),
-                Style::default().fg(PENDING).add_modifier(
-                    if in_filter_mode && self.selected_filter_index == 3 {
-                        Modifier::BOLD | Modifier::UNDERLINED
-                    } else {
-                        Modifier::empty()
-                    },
-                ),
-            ),
-            // Blocked checkbox
-            Span::styled(
-                format!("{} Blocked  ", blocked_checkbox),
-                Style::default().fg(BLOCKED).add_modifier(
-                    if in_filter_mode && self.selected_filter_index == 4 {
-                        Modifier::BOLD | Modifier::UNDERLINED
-                    } else {
-                        Modifier::empty()
-                    },
-                ),
-            ),
-            // Separator
-            Span::styled("  │  ", Style::default().fg(FG_DIM)),
-            // Duration dropdown button
-            Span::styled(
-                format!("⏱ {}", self.duration_filter),
-                Style::default()
-                    .fg(if self.duration_filter == "All durations" {
-                        FG_PRIMARY
-                    } else {
-                        ACCENT
-                    })
-                    .add_modifier(if in_filter_mode && self.selected_filter_index == 5 {
-                        Modifier::BOLD | Modifier::UNDERLINED
-                    } else {
-                        Modifier::empty()
-                    }),
-            ),
-        ];
-
-        let line = Line::from(spans);
-        let paragraph = Paragraph::new(line);
-        f.render_widget(paragraph, area);
-
-        // Render duration dropdown if open
-        if self.duration_dropdown_open {
-            self.render_duration_dropdown(f, area);
+        // Render dropdown LAST for proper z-ordering
+        if self.faceted_search.is_active() {
+            self.faceted_search.render_dropdown_only(f, chunks[0]);
         }
     }
 
-    /// Render the duration filter dropdown overlay
-    fn render_duration_dropdown(&self, f: &mut Frame, filter_area: Rect) {
-        use ratatui::widgets::Clear;
-
-        // Calculate position for dropdown (below the duration button)
-        let dropdown_width = 25; // Width for duration options
-        let dropdown_height = (self.duration_options.len() as u16) + 2; // Add borders
-
-        // Position dropdown below the filter bar, aligned with duration button
-        let dropdown_area = Rect {
-            x: filter_area.x + 60, // Approximate position of duration button
-            y: filter_area.y + 1,
-            width: dropdown_width.min(f.area().width.saturating_sub(filter_area.x + 60)),
-            height: dropdown_height.min(f.area().height.saturating_sub(filter_area.y + 1)),
-        };
-
-        // Create list items with checkmarks for selected option
-        let items: Vec<ListItem> = self
-            .duration_options
-            .iter()
-            .enumerate()
-            .map(|(idx, option)| {
-                let is_selected = option == &self.duration_filter;
-                let is_focused = idx == self.selected_duration_index;
-
-                let checkbox = if is_selected { "✓" } else { " " };
-                let text = format!(" {} {}", checkbox, option);
-
-                let style = if is_focused {
-                    // Focused item in dropdown
-                    Style::default()
-                        .bg(ratatui::style::Color::DarkGray)
-                        .fg(FG_BRIGHT)
-                        .add_modifier(Modifier::BOLD)
-                } else if is_selected {
-                    // Selected item (not focused)
-                    Style::default().fg(ACCENT)
-                } else {
-                    // Regular item
-                    Style::default().fg(FG_PRIMARY)
-                };
-
-                ListItem::new(text).style(style)
-            })
-            .collect();
-
-        let list = List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(ACCENT))
-                .style(Style::default().bg(BG_PANEL)),
-        );
-
-        // Render dropdown as overlay
-        f.render_widget(Clear, dropdown_area);
-        f.render_widget(list, dropdown_area);
+    /// Render the faceted search bar (status and duration filters)
+    fn render_faceted_search_bar(&mut self, f: &mut Frame, area: Rect) {
+        // Render only the filter buttons (dropdown is rendered separately for z-ordering)
+        self.faceted_search.render_filter_bar_only(f, area);
     }
 
     /// Render the job list
@@ -1310,34 +982,28 @@ impl PipelineDetailScreen {
             Span::styled(" View Logs  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[s]", Style::default().fg(ACCENT)),
             Span::styled(" SSH  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[/]", Style::default().fg(ACCENT)),
-            Span::styled(" Search  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[f]", Style::default().fg(ACCENT)),
             Span::styled(" Filters  ", Style::default().fg(FG_PRIMARY)),
         ];
 
         // Add filter mode shortcuts if in filter mode
         if self.focus == PanelFocus::Filters {
-            if self.filter_focus == FilterFocus::TextInput {
-                footer_items.push(Span::styled("[Type]", Style::default().fg(ACCENT)));
-                footer_items.push(Span::styled(" Filter Text  ", Style::default().fg(FG_PRIMARY)));
-                footer_items.push(Span::styled("[Tab/↓]", Style::default().fg(ACCENT)));
-                footer_items.push(Span::styled(" To Checkboxes  ", Style::default().fg(FG_PRIMARY)));
-            } else if self.duration_dropdown_open {
+            if self.faceted_search.is_active() {
+                // Dropdown is open
                 footer_items.push(Span::styled("[↑↓]", Style::default().fg(ACCENT)));
-                footer_items.push(Span::styled(" Select  ", Style::default().fg(FG_PRIMARY)));
-                footer_items.push(Span::styled("[⏎]", Style::default().fg(ACCENT)));
-                footer_items.push(Span::styled(" Apply  ", Style::default().fg(FG_PRIMARY)));
-            } else {
-                footer_items.push(Span::styled("[←→/Tab]", Style::default().fg(ACCENT)));
                 footer_items.push(Span::styled(" Navigate  ", Style::default().fg(FG_PRIMARY)));
-                footer_items.push(Span::styled("[↑]", Style::default().fg(ACCENT)));
-                footer_items.push(Span::styled(" To Text  ", Style::default().fg(FG_PRIMARY)));
-                footer_items.push(Span::styled("[Space/⏎]", Style::default().fg(ACCENT)));
-                footer_items.push(Span::styled(
-                    " Toggle/Open  ",
-                    Style::default().fg(FG_PRIMARY),
-                ));
+                footer_items.push(Span::styled("[⏎]", Style::default().fg(ACCENT)));
+                footer_items.push(Span::styled(" Select  ", Style::default().fg(FG_PRIMARY)));
+                footer_items.push(Span::styled("[Esc]", Style::default().fg(ACCENT)));
+                footer_items.push(Span::styled(" Close  ", Style::default().fg(FG_PRIMARY)));
+            } else {
+                // Navigating filter buttons
+                footer_items.push(Span::styled("[←→/Tab]", Style::default().fg(ACCENT)));
+                footer_items.push(Span::styled(" Switch Filter  ", Style::default().fg(FG_PRIMARY)));
+                footer_items.push(Span::styled("[⏎/Space]", Style::default().fg(ACCENT)));
+                footer_items.push(Span::styled(" Open  ", Style::default().fg(FG_PRIMARY)));
+                footer_items.push(Span::styled("[Esc]", Style::default().fg(ACCENT)));
+                footer_items.push(Span::styled(" Exit  ", Style::default().fg(FG_PRIMARY)));
             }
         }
 
@@ -1570,12 +1236,10 @@ mod tests {
         ];
         screen.set_jobs(jobs);
 
-        // Enable only failed filter
-        screen.filter_success = false;
-        screen.filter_running = false;
-        screen.filter_failed = true;
-        screen.filter_pending = false;
-        screen.filter_blocked = false;
+        // Set status filter to "failed" via faceted search
+        // Facet 0 is status: [All, success, running, failed, pending, blocked]
+        // Index 3 is "failed", Facet 1 stays at index 0 (All durations)
+        screen.faceted_search.restore_filter_state(&[3, 0]);
 
         let filtered = screen.get_filtered_jobs();
 
@@ -1634,80 +1298,22 @@ mod tests {
         ];
         screen.set_jobs(jobs);
 
-        // Test filtering by specific status
-        screen.filter_success = false;
-        screen.filter_running = true;
-        screen.filter_failed = true;
-        screen.filter_pending = true;
-        screen.filter_blocked = true;
-
+        // Test filtering by "running" status
+        // Facet 0 status indices: [0=All, 1=success, 2=running, 3=failed, 4=pending, 5=blocked]
+        screen.faceted_search.restore_filter_state(&[2, 0]);
         let filtered = screen.get_filtered_jobs();
-        // No success jobs should be included
-        assert!(filtered.iter().all(|job| job.status != "success"));
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].status, "running");
 
         // Test filtering only failed jobs
-        screen.filter_success = false;
-        screen.filter_running = false;
-        screen.filter_failed = true;
-        screen.filter_pending = false;
-        screen.filter_blocked = false;
-
+        screen.faceted_search.restore_filter_state(&[3, 0]);
         let filtered = screen.get_filtered_jobs();
-        // Only failed jobs should be included
+        assert_eq!(filtered.len(), 1);
         assert!(filtered
             .iter()
             .all(|job| job.status == "failed" || job.status == "error" || job.status == "failure"));
     }
 
-    #[test]
-    fn test_filter_toggle() {
-        let pipeline = create_test_pipeline();
-        let mut screen = PipelineDetailScreen::new(pipeline);
-
-        // Test toggling filters
-        let initial = screen.filter_success;
-        screen.selected_filter_index = 0;
-        screen.toggle_selected_filter();
-        assert_eq!(screen.filter_success, !initial);
-
-        let initial = screen.filter_running;
-        screen.selected_filter_index = 1;
-        screen.toggle_selected_filter();
-        assert_eq!(screen.filter_running, !initial);
-
-        let initial = screen.filter_failed;
-        screen.selected_filter_index = 2;
-        screen.toggle_selected_filter();
-        assert_eq!(screen.filter_failed, !initial);
-    }
-
-    #[test]
-    fn test_get_filter_info() {
-        let pipeline = create_test_pipeline();
-        let mut screen = PipelineDetailScreen::new(pipeline);
-
-        // All filters enabled, all durations
-        assert_eq!(screen.get_filter_info(), "All statuses");
-
-        // Some filters disabled
-        screen.filter_success = false;
-        screen.filter_running = false;
-        assert_eq!(screen.get_filter_info(), "3/5 statuses");
-
-        // Only one filter enabled
-        screen.filter_failed = false;
-        screen.filter_pending = false;
-        assert_eq!(screen.get_filter_info(), "1/5 statuses");
-
-        // Test with duration filter
-        screen.filter_success = true;
-        screen.filter_running = true;
-        screen.filter_failed = true;
-        screen.filter_pending = true;
-        screen.filter_blocked = true;
-        screen.duration_filter = "Quick (< 1min)".to_string();
-        assert_eq!(screen.get_filter_info(), "All statuses, Quick (< 1min)");
-    }
 
     #[test]
     fn test_duration_filter() {
@@ -1761,24 +1367,25 @@ mod tests {
         screen.set_jobs(jobs);
 
         // Test "All durations" - should show all jobs
-        screen.duration_filter = "All durations".to_string();
+        // Facet 1 duration indices: [0=All, 1=Quick, 2=Short, 3=Medium, 4=Long, 5=Very Long]
+        screen.faceted_search.restore_filter_state(&[0, 0]);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 3);
 
         // Test "Quick (< 1min)" - should show only job1
-        screen.duration_filter = "Quick (< 1min)".to_string();
+        screen.faceted_search.restore_filter_state(&[0, 1]);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "quick");
 
         // Test "Short (1-5min)" - should show only job2
-        screen.duration_filter = "Short (1-5min)".to_string();
+        screen.faceted_search.restore_filter_state(&[0, 2]);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "short");
 
         // Test "Long (15-30min)" - should show only job3
-        screen.duration_filter = "Long (15-30min)".to_string();
+        screen.faceted_search.restore_filter_state(&[0, 4]);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "long");
