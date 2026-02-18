@@ -1,0 +1,434 @@
+warning: unused import: `client::CircleCIClient`
+ --> src/api/mod.rs:5:9
+  |
+5 | pub use client::CircleCIClient;
+  |         ^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `error::ApiError`
+ --> src/api/mod.rs:6:9
+  |
+6 | pub use error::ApiError;
+  |         ^^^^^^^^^^^^^^^
+
+warning: unused imports: `Job`, `Pipeline`, and `Workflow`
+ --> src/api/mod.rs:7:18
+  |
+7 | pub use models::{Job, Pipeline, Workflow};
+  |                  ^^^  ^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `PanelFocus`
+ --> src/ui/screens/mod.rs:5:27
+  |
+5 | pub use pipeline_detail::{PanelFocus, PipelineDetailAction, PipelineDetailScreen};
+  |                           ^^^^^^^^^^
+
+warning: unused import: `BORDER_FOCUSED`
+ --> src/ui/widgets/error_modal.rs:5:43
+  |
+5 | use crate::theme::{ACCENT_WARN, BG_PANEL, BORDER_FOCUSED, FAILED_TEXT, FG_BRIGHT, FG_DIM, FG_PRIMARY};
+  |                                           ^^^^^^^^^^^^^^
+
+warning: unused import: `Wrap`
+  --> src/ui/widgets/log_modal.rs:16:49
+   |
+16 |     widgets::{Block, Borders, Clear, Paragraph, Wrap},
+   |                                                 ^^^^
+
+warning: unused import: `get_status_color`
+ --> src/ui/widgets/status_badge.rs:4:24
+  |
+4 | pub use crate::theme::{get_status_color, get_status_icon};
+  |                        ^^^^^^^^^^^^^^^^
+
+warning: unused import: `RUNNING`
+ --> src/ui/widgets/status_message.rs:6:52
+  |
+6 | use crate::theme::{ACCENT, FAILED_TEXT, FG_BRIGHT, RUNNING, SUCCESS};
+  |                                                    ^^^^^^^
+
+warning: use of deprecated method `ratatui::Frame::<'_>::size`: use .area() as it's the more correct name
+   --> src/app.rs:284:22
+    |
+284 |         let area = f.size();
+    |                      ^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: unused variable: `inner`
+   --> src/ui/screens/pipelines.rs:364:17
+    |
+364 |             let inner = block.inner(area);
+    |                 ^^^^^ help: if this is intentional, prefix it with an underscore: `_inner`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `body` is never read
+  --> src/api/client.rs:64:5
+   |
+62 | struct CommitResponse {
+   |        -------------- field in this struct
+63 |     subject: Option<String>,
+64 |     body: Option<String>,
+   |     ^^^^
+   |
+   = note: `CommitResponse` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `avatar_url` is never read
+  --> src/api/client.rs:77:5
+   |
+75 | struct ActorResponse {
+   |        ------------- field in this struct
+76 |     login: Option<String>,
+77 |     avatar_url: Option<String>,
+   |     ^^^^^^^^^^
+   |
+   = note: `ActorResponse` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `next_page_token` is never read
+  --> src/api/client.rs:83:5
+   |
+81 | struct WorkflowResponse {
+   |        ---------------- field in this struct
+82 |     items: Vec<WorkflowItem>,
+83 |     next_page_token: Option<String>,
+   |     ^^^^^^^^^^^^^^^
+   |
+   = note: `WorkflowResponse` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: method `rerun_workflow` is never used
+   --> src/api/client.rs:376:18
+    |
+114 | impl CircleCIClient {
+    | ------------------- method in this implementation
+...
+376 |     pub async fn rerun_workflow(&self, workflow_id: &str) -> Result<(), ApiError> {
+    |                  ^^^^^^^^^^^^^^
+
+warning: method `user_message` is never used
+  --> src/api/error.rs:13:12
+   |
+11 | impl ApiError {
+   | ------------- method in this implementation
+12 |     /// Get a user-friendly error message with helpful suggestions
+13 |     pub fn user_message(&self) -> String {
+   |            ^^^^^^^^^^^^
+
+warning: field `log_output` is never read
+   --> src/api/models.rs:115:9
+    |
+109 | pub struct StepAction {
+    |            ---------- field in this struct
+...
+115 |     pub log_output: Vec<String>,
+    |         ^^^^^^^^^^
+    |
+    = note: `StepAction` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `mock_workflows` is never used
+   --> src/api/models.rs:273:12
+    |
+273 |     pub fn mock_workflows(pipeline_id: &str) -> Vec<Workflow> {
+    |            ^^^^^^^^^^^^^^
+
+warning: function `mock_jobs` is never used
+   --> src/api/models.rs:338:12
+    |
+338 |     pub fn mock_jobs(workflow_id: &str) -> Vec<Job> {
+    |            ^^^^^^^^^
+
+warning: field `0` is never read
+  --> src/app.rs:28:20
+   |
+28 |     PipelineDetail(Pipeline),
+   |     -------------- ^^^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `Screen` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+28 -     PipelineDetail(Pipeline),
+28 +     PipelineDetail(()),
+   |
+
+warning: field `config` is never read
+  --> src/app.rs:44:9
+   |
+32 | pub struct App {
+   |            --- field in this struct
+...
+44 |     pub config: Config,
+   |         ^^^^^^
+
+warning: methods `run`, `load_more_jobs`, `rerun_workflow`, `show_error`, and `show_error_with_details` are never used
+   --> src/app.rs:96:12
+    |
+ 65 | impl App {
+    | -------- methods in this implementation
+...
+ 96 |     pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
+    |            ^^^
+...
+482 |     pub async fn load_more_jobs(&mut self, workflow_id: &str) -> Result<()> {
+    |                  ^^^^^^^^^^^^^^
+...
+514 |     pub async fn rerun_workflow(&mut self, workflow_id: &str) -> Result<()> {
+    |                  ^^^^^^^^^^^^^^
+...
+598 |     pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
+    |            ^^^^^^^^^^
+...
+619 |     pub fn show_error_with_details(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `AppEvent` is never used
+  --> src/events.rs:14:10
+   |
+14 | pub enum AppEvent {
+   |          ^^^^^^^^
+
+warning: struct `EventHandler` is never constructed
+  --> src/events.rs:24:12
+   |
+24 | pub struct EventHandler {
+   |            ^^^^^^^^^^^^
+
+warning: associated items `new` and `next` are never used
+  --> src/events.rs:34:12
+   |
+29 | impl EventHandler {
+   | ----------------- associated items in this implementation
+...
+34 |     pub fn new() -> Self {
+   |            ^^^
+...
+61 |     pub fn next(&self) -> Result<AppEvent> {
+   |            ^^^^
+
+warning: struct `Pipeline` is never constructed
+ --> src/models.rs:6:12
+  |
+6 | pub struct Pipeline {
+  |            ^^^^^^^^
+
+warning: struct `Workflow` is never constructed
+  --> src/models.rs:18:12
+   |
+18 | pub struct Workflow {
+   |            ^^^^^^^^
+
+warning: struct `Job` is never constructed
+  --> src/models.rs:27:12
+   |
+27 | pub struct Job {
+   |            ^^^
+
+warning: constant `BG_HIGHLIGHT` is never used
+  --> src/theme.rs:31:11
+   |
+31 | pub const BG_HIGHLIGHT: Color = Color::Rgb(18, 22, 30); // #12161e
+   |           ^^^^^^^^^^^^
+
+warning: constant `BG_HOVER` is never used
+  --> src/theme.rs:34:11
+   |
+34 | pub const BG_HOVER: Color = Color::Rgb(24, 28, 38); // #181c26
+   |           ^^^^^^^^
+
+warning: constant `ACCENT_DIM` is never used
+  --> src/theme.rs:85:11
+   |
+85 | pub const ACCENT_DIM: Color = Color::Rgb(247, 168, 179); // #f7a8b3
+   |           ^^^^^^^^^^
+
+warning: constant `BORDER_SUBTLE` is never used
+   --> src/theme.rs:101:11
+    |
+101 | pub const BORDER_SUBTLE: Color = Color::Rgb(62, 68, 81); // #3e4451
+    |           ^^^^^^^^^^^^^
+
+warning: field `show_rerun_confirm` is never read
+  --> src/ui/screens/pipeline_detail.rs:95:9
+   |
+51 | pub struct PipelineDetailScreen {
+   |            -------------------- field in this struct
+...
+95 |     pub show_rerun_confirm: bool,
+   |         ^^^^^^^^^^^^^^^^^^
+
+warning: methods `set_jobs` and `append_jobs` are never used
+   --> src/ui/screens/pipeline_detail.rs:159:12
+    |
+102 | impl PipelineDetailScreen {
+    | ------------------------- methods in this implementation
+...
+159 |     pub fn set_jobs(&mut self, jobs: Vec<Job>) {
+    |            ^^^^^^^^
+...
+191 |     pub fn append_jobs(&mut self, jobs: Vec<Job>, next_page_token: Option<String>) {
+    |            ^^^^^^^^^^^
+
+warning: method `get_unique_branches` is never used
+   --> src/ui/screens/pipelines.rs:192:12
+    |
+ 66 | impl PipelineScreen {
+    | ------------------- method in this implementation
+...
+192 |     pub fn get_unique_branches(&self) -> Vec<String> {
+    |            ^^^^^^^^^^^^^^^^^^^
+
+warning: function `truncate_string` is never used
+   --> src/ui/screens/pipelines.rs:851:4
+    |
+851 | fn truncate_string(s: &str, max_len: usize) -> String {
+    |    ^^^^^^^^^^^^^^^
+
+warning: methods `is_visible` and `hide` are never used
+   --> src/ui/widgets/confirm_modal.rs:146:12
+    |
+ 36 | impl ConfirmModal {
+    | ----------------- methods in this implementation
+...
+146 |     pub fn is_visible(&self) -> bool {
+    |            ^^^^^^^^^^
+...
+151 |     pub fn hide(&mut self) {
+    |            ^^^^
+
+warning: associated items `new`, `is_visible`, and `hide` are never used
+   --> src/ui/widgets/error_modal.rs:58:12
+    |
+ 42 | impl ErrorModal {
+    | --------------- associated items in this implementation
+...
+ 58 |     pub fn new(title: String, error_message: String) -> Self {
+    |            ^^^
+...
+281 |     pub fn is_visible(&self) -> bool {
+    |            ^^^^^^^^^^
+...
+286 |     pub fn hide(&mut self) {
+    |            ^^^^
+
+warning: methods `is_visible` and `hide` are never used
+   --> src/ui/widgets/help_modal.rs:189:12
+    |
+ 31 | impl HelpModal {
+    | -------------- methods in this implementation
+...
+189 |     pub fn is_visible(&self) -> bool {
+    |            ^^^^^^^^^^
+...
+194 |     pub fn hide(&mut self) {
+    |            ^^^^
+
+warning: function `render_job_item` is never used
+  --> src/ui/widgets/job_item.rs:14:8
+   |
+14 | pub fn render_job_item<'a>(job: &'a Job, selected: bool) -> Vec<Line<'a>> {
+   |        ^^^^^^^^^^^^^^^
+
+warning: function `truncate_string` is never used
+  --> src/ui/widgets/job_item.rs:41:4
+   |
+41 | fn truncate_string(s: &str, max_len: usize) -> String {
+   |    ^^^^^^^^^^^^^^^
+
+warning: multiple associated items are never used
+   --> src/ui/widgets/log_modal.rs:111:12
+    |
+ 55 | impl LogModal {
+    | ------------- associated items in this implementation
+...
+111 |     pub fn is_streaming(&self) -> bool {
+    |            ^^^^^^^^^^^^
+...
+116 |     pub fn set_completed(&mut self) {
+    |            ^^^^^^^^^^^^^
+...
+381 |     fn highlight_log_line(&self, line: &str) -> Line<'static> {
+    |        ^^^^^^^^^^^^^^^^^^
+...
+486 |     fn load_mock_logs(job: &Job) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^
+...
+498 |     fn generate_failed_logs(job: &Job) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^^^
+...
+523 |     fn generate_success_logs(job: &Job) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+...
+549 |     fn generate_running_logs(job: &Job) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+...
+570 |     fn generate_generic_logs(job: &Job) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `render_pipeline_item` is never used
+  --> src/ui/widgets/pipeline_item.rs:14:8
+   |
+14 | pub fn render_pipeline_item<'a>(pipeline: &'a Pipeline, selected: bool) -> Vec<Line<'a>> {
+   |        ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `truncate_string` is never used
+  --> src/ui/widgets/pipeline_item.rs:50:4
+   |
+50 | fn truncate_string(s: &str, max_len: usize) -> String {
+   |    ^^^^^^^^^^^^^^^
+
+warning: methods `with_elapsed_time` and `render_with_block` are never used
+   --> src/ui/widgets/spinner.rs:49:12
+    |
+ 35 | impl Spinner {
+    | ------------ methods in this implementation
+...
+ 49 |     pub fn with_elapsed_time(mut self) -> Self {
+    |            ^^^^^^^^^^^^^^^^^
+...
+113 |     pub fn render_with_block(&self, title: impl Into<String>) -> Paragraph<'_> {
+    |            ^^^^^^^^^^^^^^^^^
+
+warning: function `format_status_badge` is never used
+ --> src/ui/widgets/status_badge.rs:7:8
+  |
+7 | pub fn format_status_badge(status: &str) -> String {
+  |        ^^^^^^^^^^^^^^^^^^^
+
+warning: variants `Success` and `Error` are never constructed
+  --> src/ui/widgets/status_message.rs:19:5
+   |
+17 | pub enum MessageLevel {
+   |          ------------ variants in this enum
+18 |     /// Success message (green)
+19 |     Success,
+   |     ^^^^^^^
+...
+23 |     Error,
+   |     ^^^^^
+   |
+   = note: `MessageLevel` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated items `success`, `error`, `remaining_time`, and `with_duration` are never used
+  --> src/ui/widgets/status_message.rs:50:12
+   |
+38 | impl StatusMessage {
+   | ------------------ associated items in this implementation
+...
+50 |     pub fn success(text: impl Into<String>) -> Self {
+   |            ^^^^^^^
+...
+60 |     pub fn error(text: impl Into<String>) -> Self {
+   |            ^^^^^
+...
+70 |     pub fn remaining_time(&self) -> Duration {
+   |            ^^^^^^^^^^^^^^
+...
+97 |     pub fn with_duration(mut self, duration: Duration) -> Self {
+   |            ^^^^^^^^^^^^^
+
+warning: `circleci-tui-rs` (bin "circleci-tui-rs") generated 47 warnings (run `cargo fix --bin "circleci-tui-rs" -p circleci-tui-rs` to apply 9 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/circleci-tui-rs`

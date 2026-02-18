@@ -546,7 +546,9 @@ impl CircleCIClient {
     /// # Returns
     /// List of formatted log lines with timestamps
     pub async fn stream_job_log(&self, job_number: u32) -> Result<Vec<String>, ApiError> {
+        eprintln!("[DEBUG] Fetching job steps for job #{}", job_number);
         let steps = self.get_job_steps(job_number).await?;
+        eprintln!("[DEBUG] Got {} steps for job #{}", steps.len(), job_number);
         let mut all_logs = Vec::new();
 
         // Check if any action has logs
@@ -601,6 +603,7 @@ impl CircleCIClient {
             }
         }
 
+        eprintln!("[DEBUG] Returning {} log lines for job #{}", all_logs.len(), job_number);
         Ok(all_logs)
     }
 }

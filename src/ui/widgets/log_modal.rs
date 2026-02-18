@@ -73,9 +73,11 @@ impl LogModal {
 
     /// Set the log lines to display
     pub fn set_logs(&mut self, logs: Vec<String>) {
+        eprintln!("[DEBUG] Setting logs: {} lines", logs.len());
         self.log_lines = logs;
         self.last_fetch = Instant::now();
         self.is_loading = false;
+        eprintln!("[DEBUG] is_loading set to false");
 
         // Auto-scroll to bottom if enabled
         if self.auto_scroll {

@@ -34,9 +34,11 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
 
         // Check if we need to load logs (initial load for newly opened modal)
         if let Some(job_number) = app.pending_log_load {
+            eprintln!("[DEBUG] Triggering log load for job #{}", job_number);
             app.pending_log_load = None;
-            if let Err(e) = app.load_job_logs(job_number).await {
-                eprintln!("Error loading logs: {}", e);
+            match app.load_job_logs(job_number).await {
+                Ok(_) => eprintln!("[DEBUG] Successfully loaded logs for job #{}", job_number),
+                Err(e) => eprintln!("[ERROR] Failed to load logs for job #{}: {}", job_number, e),
             }
         }
 

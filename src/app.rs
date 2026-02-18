@@ -383,10 +383,12 @@ impl App {
     /// Shows job logs as a modal overlay on top of the current screen.
     pub fn open_job_log_modal(&mut self, job: Job) {
         let job_number = job.job_number;
+        eprintln!("[DEBUG] Opening log modal for job #{} ({})", job_number, job.name);
         self.log_modal = Some(LogModal::new(job));
 
         // Mark this job as needing log load on next event loop iteration
         self.pending_log_load = Some(job_number);
+        eprintln!("[DEBUG] Set pending_log_load = Some({})", job_number);
     }
 
     /// Close the log modal
