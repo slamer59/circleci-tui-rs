@@ -3,13 +3,15 @@
 //! This module contains the main App struct that manages the application state,
 //! handles events, and coordinates between different screens.
 
+use crate::api::client::CircleCIClient;
 use crate::api::models::{Job, Pipeline};
 use crate::config::Config;
-use crate::ui::screens::{PanelFocus, PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
+use crate::ui::screens::{PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
 use crate::ui::widgets::log_modal::{LogModal, ModalAction};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{backend::Backend, Frame, Terminal};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Application screens
@@ -35,19 +37,31 @@ pub struct App {
     pub should_quit: bool,
     /// Application configuration
     pub config: Config,
+    /// CircleCI API client
+    pub api_client: Arc<CircleCIClient>,
+    /// Loading state
+    pub is_loading: bool,
 }
 
 impl App {
     /// Create a new application instance
-    pub fn new(config: Config) -> Self {
-        Self {
+    pub fn new(config: Config) -> Result<Self> {
+        // Create API client
+        let api_client = Arc::new(CircleCIClient::new(
+            config.circle_token.clone(),
+            config.project_slug.clone(),
+        )?);
+
+        Ok(Self {
             current_screen: Screen::Pipelines,
             pipeline_screen: PipelineScreen::new(),
             pipeline_detail_screen: None,
             log_modal: None,
             should_quit: false,
             config,
-        }
+            api_client,
+            is_loading: false,
+        })
     }
 
     /// Run the main application loop
@@ -198,6 +212,58 @@ impl App {
     /// Hides the job log modal overlay.
     pub fn close_log_modal(&mut self) {
         self.log_modal = None;
+    }
+
+    /// Load pipelines from the API
+    ///
+    /// This is an async method that fetches pipelines and updates the screen state.
+    pub async fn load_pipelines(&mut self) -> Result<()> {
+        self.is_loading = true;
+
+        // Fetch pipelines from API (limit to 50)
+        let pipelines = self.api_client.get_pipelines(50).await?;
+
+        // Update pipeline screen with new data
+        self.pipeline_screen.set_pipelines(pipelines);
+
+        self.is_loading = false;
+        Ok(())
+    }
+
+    /// Load workflows for a pipeline
+    ///
+    /// This is an async method that fetches workflows and updates the detail screen.
+    pub async fn load_workflows(&mut self, pipeline_id: &str) -> Result<()> {
+        self.is_loading = true;
+
+        // Fetch workflows from API
+        let workflows = self.api_client.get_workflows(pipeline_id).await?;
+
+        // Update detail screen with workflows
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.set_workflows(workflows);
+        }
+
+        self.is_loading = false;
+        Ok(())
+    }
+
+    /// Load jobs for a workflow
+    ///
+    /// This is an async method that fetches jobs and updates the detail screen.
+    pub async fn load_jobs(&mut self, workflow_id: &str) -> Result<()> {
+        self.is_loading = true;
+
+        // Fetch jobs from API
+        let jobs = self.api_client.get_jobs(workflow_id).await?;
+
+        // Update detail screen with jobs
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.set_jobs(jobs);
+        }
+
+        self.is_loading = false;
+        Ok(())
     }
 }
 

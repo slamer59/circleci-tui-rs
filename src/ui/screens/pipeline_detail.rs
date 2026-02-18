@@ -6,9 +6,10 @@
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_INPUT, BG_PANEL, BORDER, BORDER_FOCUSED,
-    FG_BRIGHT, FG_DIM, FG_PRIMARY,
+    FG_BRIGHT, FG_DIM, FG_PRIMARY, SUCCESS, FAILED_TEXT, RUNNING,
 };
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
+use crate::ui::widgets::spinner::Spinner;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -60,6 +61,12 @@ pub struct PipelineDetailScreen {
     pub workflow_list_state: ListState,
     /// List state for job selection
     pub job_list_state: ListState,
+    /// Loading workflows
+    pub loading_workflows: bool,
+    /// Loading jobs
+    pub loading_jobs: bool,
+    /// Spinner for loading state
+    pub spinner: Spinner,
 }
 
 impl PipelineDetailScreen {
@@ -96,6 +103,30 @@ impl PipelineDetailScreen {
             show_only_failed: false,
             workflow_list_state,
             job_list_state,
+            loading_workflows: false,
+            loading_jobs: false,
+            spinner: Spinner::new("Loading..."),
+        }
+    }
+
+    /// Set workflows from external source (e.g., API)
+    pub fn set_workflows(&mut self, workflows: Vec<Workflow>) {
+        self.workflows = workflows;
+        if !self.workflows.is_empty() {
+            self.selected_workflow_index = 0;
+            self.workflow_list_state.select(Some(0));
+        }
+    }
+
+    /// Set jobs from external source (e.g., API)
+    pub fn set_jobs(&mut self, jobs: Vec<Job>) {
+        self.jobs = jobs;
+        if !self.jobs.is_empty() {
+            self.selected_job_index = Some(0);
+            self.job_list_state.select(Some(0));
+        } else {
+            self.selected_job_index = None;
+            self.job_list_state.select(None);
         }
     }
 
@@ -379,49 +410,6 @@ impl PipelineDetailScreen {
 
     /// Render the workflows panel (left side)
     fn render_workflows_panel(&mut self, f: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = self
-            .workflows
-            .iter()
-            .enumerate()
-            .map(|(idx, workflow)| {
-                let icon = get_status_icon(&workflow.status);
-                let status_col = get_status_color(&workflow.status);
-                let is_selected = idx == self.selected_workflow_index;
-
-                let arrow = if is_selected { "▶ " } else { "  " };
-                let duration = workflow.duration_formatted();
-
-                let line = if is_selected {
-                    Line::from(vec![
-                        Span::styled(arrow, Style::default().fg(ACCENT)),
-                        Span::styled(
-                            format!("{} ", icon),
-                            Style::default()
-                                .fg(status_col)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            format!("{:<20} ", truncate_string(&workflow.name, 18)),
-                            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(duration, Style::default().fg(FG_DIM)),
-                    ])
-                } else {
-                    Line::from(vec![
-                        Span::styled(arrow, Style::default().fg(FG_DIM)),
-                        Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
-                        Span::styled(
-                            format!("{:<20} ", truncate_string(&workflow.name, 18)),
-                            Style::default().fg(FG_PRIMARY),
-                        ),
-                        Span::styled(duration, Style::default().fg(FG_DIM)),
-                    ])
-                };
-
-                ListItem::new(line)
-            })
-            .collect();
-
         let block = Block::default()
             .title(" WORKFLOWS ")
             .borders(Borders::ALL)
@@ -433,9 +421,83 @@ impl PipelineDetailScreen {
             }))
             .style(Style::default().bg(BG_PANEL));
 
-        let list = List::new(items).block(block);
+        if self.loading_workflows {
+            // Show loading spinner
+            self.spinner.tick();
+            self.spinner.set_message("Loading workflows...");
+            let inner = block.inner(area);
+            f.render_widget(block, area);
 
-        f.render_stateful_widget(list, area, &mut self.workflow_list_state);
+            let spinner_widget = self.spinner.render();
+            f.render_widget(spinner_widget, inner);
+        } else if self.workflows.is_empty() {
+            // Show empty state
+            let inner = block.inner(area);
+            f.render_widget(block, area);
+
+            let empty_message = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "No workflows found",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "for this pipeline",
+                    Style::default().fg(FG_DIM),
+                )),
+            ])
+            .alignment(Alignment::Center);
+
+            f.render_widget(empty_message, inner);
+        } else {
+            // Normal rendering
+            let items: Vec<ListItem> = self
+                .workflows
+                .iter()
+                .enumerate()
+                .map(|(idx, workflow)| {
+                    let icon = get_status_icon(&workflow.status);
+                    let status_col = get_status_color(&workflow.status);
+                    let is_selected = idx == self.selected_workflow_index;
+
+                    let arrow = if is_selected { "▶ " } else { "  " };
+                    let duration = workflow.duration_formatted();
+
+                    let line = if is_selected {
+                        Line::from(vec![
+                            Span::styled(arrow, Style::default().fg(ACCENT)),
+                            Span::styled(
+                                format!("{} ", icon),
+                                Style::default()
+                                    .fg(status_col)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{:<20} ", truncate_string(&workflow.name, 18)),
+                                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(duration, Style::default().fg(FG_DIM)),
+                        ])
+                    } else {
+                        Line::from(vec![
+                            Span::styled(arrow, Style::default().fg(FG_DIM)),
+                            Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
+                            Span::styled(
+                                format!("{:<20} ", truncate_string(&workflow.name, 18)),
+                                Style::default().fg(FG_PRIMARY),
+                            ),
+                            Span::styled(duration, Style::default().fg(FG_DIM)),
+                        ])
+                    };
+
+                    ListItem::new(line)
+                })
+                .collect();
+
+            let list = List::new(items).block(block);
+
+            f.render_stateful_widget(list, area, &mut self.workflow_list_state);
+        }
     }
 
     /// Render the jobs panel (right side)
@@ -491,53 +553,14 @@ impl PipelineDetailScreen {
     fn render_job_list(&mut self, f: &mut Frame, area: Rect) {
         let filtered_jobs = self.get_filtered_jobs();
 
-        // Build multi-line list items in glim style
-        let mut items: Vec<ListItem> = Vec::new();
-
-        for job in filtered_jobs.iter() {
-            let _icon = get_status_icon(&job.status);
-            let status_col = get_status_color(&job.status);
-
-            // Line 1: ● [time] [job_name] [duration] ●
-            let time = if let Some(started) = job.started_at {
-                format!("{}", started.format("%H:%M"))
-            } else {
-                "pending".to_string()
-            };
-
-            let duration = job.duration_formatted();
-
-            let line1 = Line::from(vec![
-                Span::styled("● ", Style::default().fg(status_col)),
-                Span::styled(format!("{}  ", time), Style::default().fg(FG_DIM)),
-                Span::styled(
-                    format!("{:<20} ", truncate_string(&job.name, 18)),
-                    Style::default().fg(FG_PRIMARY),
-                ),
-                Span::styled(format!("{:<8} ", duration), Style::default().fg(FG_DIM)),
-                Span::styled("●", Style::default().fg(status_col)),
-            ]);
-
-            // Line 2: indented status message or step info
-            let status_message = match job.status.as_str() {
-                "success" => "Completed successfully",
-                "failed" => "Connection timeout",
-                "running" => "In progress...",
-                "blocked" => "Waiting for dependencies",
-                "pending" => "Queued",
-                _ => &job.status,
-            };
-
-            let line2 = Line::from(vec![Span::styled(
-                format!("     {}", status_message),
-                Style::default().fg(FG_DIM),
-            )]);
-
-            items.push(ListItem::new(vec![line1, line2]));
-        }
-
+        // Calculate status summary
+        let status_summary = self.calculate_status_summary();
         let selected_workflow = &self.workflows[self.selected_workflow_index];
-        let title = format!(" JOBS › From: {} ", selected_workflow.name);
+        let title = format!(
+            " JOBS › {} {} ",
+            truncate_string(&selected_workflow.name, 20),
+            status_summary
+        );
 
         let block = Block::default()
             .title(title)
@@ -550,15 +573,139 @@ impl PipelineDetailScreen {
             }))
             .style(Style::default().bg(BG_PANEL));
 
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(
-                Style::default()
-                    .fg(ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            );
+        if self.loading_jobs {
+            // Show loading spinner
+            self.spinner.tick();
+            self.spinner.set_message("Loading jobs...");
+            let inner = block.inner(area);
+            f.render_widget(block, area);
 
-        f.render_stateful_widget(list, area, &mut self.job_list_state);
+            let spinner_widget = self.spinner.render();
+            f.render_widget(spinner_widget, inner);
+        } else if filtered_jobs.is_empty() {
+            // Show empty state
+            let inner = block.inner(area);
+            f.render_widget(block, area);
+
+            let empty_message = if self.jobs.is_empty() {
+                Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "No jobs found",
+                        Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(Span::styled(
+                        "for this workflow",
+                        Style::default().fg(FG_DIM),
+                    )),
+                ])
+            } else {
+                // Jobs exist but filtered out
+                Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "No jobs match filters",
+                        Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(Span::styled(
+                        "Press 'f' to toggle filters",
+                        Style::default().fg(FG_DIM),
+                    )),
+                ])
+            }
+            .alignment(Alignment::Center);
+
+            f.render_widget(empty_message, inner);
+        } else {
+            // Normal rendering
+            let mut items: Vec<ListItem> = Vec::new();
+
+            for job in filtered_jobs.iter() {
+                let _icon = get_status_icon(&job.status);
+                let status_col = get_status_color(&job.status);
+
+                // Line 1: ● [time] [job_name] [duration] ●
+                let time = if let Some(started) = job.started_at {
+                    format!("{}", started.format("%H:%M"))
+                } else {
+                    "pending".to_string()
+                };
+
+                let duration = job.duration_formatted();
+
+                let line1 = Line::from(vec![
+                    Span::styled("● ", Style::default().fg(status_col)),
+                    Span::styled(format!("{}  ", time), Style::default().fg(FG_DIM)),
+                    Span::styled(
+                        format!("{:<20} ", truncate_string(&job.name, 18)),
+                        Style::default().fg(FG_PRIMARY),
+                    ),
+                    Span::styled(format!("{:<8} ", duration), Style::default().fg(FG_DIM)),
+                    Span::styled("●", Style::default().fg(status_col)),
+                ]);
+
+                // Line 2: indented status message or step info
+                let status_message = match job.status.as_str() {
+                    "success" => "Completed successfully",
+                    "failed" => "Connection timeout",
+                    "running" => "In progress...",
+                    "blocked" => "Waiting for dependencies",
+                    "pending" => "Queued",
+                    _ => &job.status,
+                };
+
+                let line2 = Line::from(vec![Span::styled(
+                    format!("     {}", status_message),
+                    Style::default().fg(FG_DIM),
+                )]);
+
+                items.push(ListItem::new(vec![line1, line2]));
+            }
+
+            let list = List::new(items)
+                .block(block)
+                .highlight_style(
+                    Style::default()
+                        .fg(ACCENT)
+                        .add_modifier(Modifier::BOLD),
+                );
+
+            f.render_stateful_widget(list, area, &mut self.job_list_state);
+        }
+    }
+
+    /// Calculate status summary for jobs
+    fn calculate_status_summary(&self) -> String {
+        let mut passed = 0;
+        let mut failed = 0;
+        let mut running = 0;
+
+        for job in &self.jobs {
+            match job.status.as_str() {
+                "success" | "passed" | "fixed" | "successful" => passed += 1,
+                "failed" | "error" | "failure" => failed += 1,
+                "running" | "in_progress" | "in-progress" => running += 1,
+                _ => {}
+            }
+        }
+
+        let mut parts = Vec::new();
+
+        if passed > 0 {
+            parts.push(format!("✓ {}", passed));
+        }
+        if running > 0 {
+            parts.push(format!("● {}", running));
+        }
+        if failed > 0 {
+            parts.push(format!("✗ {}", failed));
+        }
+
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!("│ {}", parts.join("  "))
+        }
     }
 
     /// Render footer with keyboard shortcuts

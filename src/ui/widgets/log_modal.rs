@@ -81,7 +81,7 @@ impl LogModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(4), // Header
+                Constraint::Length(3), // Header (now 3 lines with timestamps)
                 Constraint::Min(0),    // Logs
                 Constraint::Length(1), // Footer
             ])
@@ -102,6 +102,19 @@ impl LogModal {
         let status_icon = get_status_icon(&self.job.status);
         let status_color = get_status_color(&self.job.status);
 
+        // Format timestamps
+        let started_str = if let Some(started) = self.job.started_at {
+            started.format("%Y-%m-%d %H:%M:%S").to_string()
+        } else {
+            "Not started".to_string()
+        };
+
+        let stopped_str = if let Some(stopped) = self.job.stopped_at {
+            stopped.format("%Y-%m-%d %H:%M:%S").to_string()
+        } else {
+            "Still running".to_string()
+        };
+
         let header_text = vec![
             Line::from(vec![
                 Span::styled("Status: ", Style::default().fg(FG_DIM)),
@@ -111,14 +124,19 @@ impl LogModal {
                         .fg(status_color)
                         .add_modifier(Modifier::BOLD),
                 ),
-            ]),
-            Line::from(vec![
+                Span::styled("  │  ", Style::default().fg(FG_DIM)),
                 Span::styled("Duration: ", Style::default().fg(FG_DIM)),
                 Span::styled(self.job.duration_formatted(), Style::default().fg(FG_PRIMARY)),
-            ]),
-            Line::from(vec![
+                Span::styled("  │  ", Style::default().fg(FG_DIM)),
                 Span::styled("Executor: ", Style::default().fg(FG_DIM)),
                 Span::styled(&self.job.executor.executor_type, Style::default().fg(FG_PRIMARY)),
+            ]),
+            Line::from(vec![
+                Span::styled("Started: ", Style::default().fg(FG_DIM)),
+                Span::styled(started_str, Style::default().fg(FG_PRIMARY)),
+                Span::styled("  │  ", Style::default().fg(FG_DIM)),
+                Span::styled("Stopped: ", Style::default().fg(FG_DIM)),
+                Span::styled(stopped_str, Style::default().fg(FG_PRIMARY)),
             ]),
             Line::from(""),
         ];
@@ -145,13 +163,26 @@ impl LogModal {
 
         let logs = Paragraph::new(visible_lines)
             .style(Style::default().bg(BG_DARK).fg(FG_PRIMARY))
-            .wrap(Wrap { trim: false });
+            .wrap(Wrap { trim: false })
+            .scroll((0, 0)); // Disable automatic scrolling
 
         f.render_widget(logs, area);
     }
 
-    /// Render the footer with keybindings
+    /// Render the footer with keybindings and scroll indicator
     fn render_footer(&self, f: &mut Frame, area: Rect) {
+        let visible_height = area.height as usize;
+        let max_scroll = self.log_lines.len().saturating_sub(visible_height);
+        let current_line = self.scroll_offset.min(max_scroll) + 1;
+        let total_lines = self.log_lines.len();
+
+        // Calculate scroll percentage for progress bar
+        let scroll_percent = if total_lines > 0 {
+            ((current_line as f32 / total_lines as f32) * 100.0) as u16
+        } else {
+            0
+        };
+
         let footer_text = vec![Line::from(vec![
             Span::styled("[Esc]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Span::styled(" Close  ", Style::default().fg(FG_DIM)),
@@ -163,7 +194,12 @@ impl LogModal {
             Span::styled("[r]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Span::styled(" Rerun  ", Style::default().fg(FG_DIM)),
             Span::styled("[s]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" SSH", Style::default().fg(FG_DIM)),
+            Span::styled(" SSH  ", Style::default().fg(FG_DIM)),
+            Span::styled("│ ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                format!("Scroll: {}/{} lines ({}%)", current_line, total_lines, scroll_percent),
+                Style::default().fg(ACCENT),
+            ),
         ])];
 
         let footer = Paragraph::new(footer_text).style(Style::default().bg(BG_PANEL));

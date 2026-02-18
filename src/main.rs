@@ -23,7 +23,8 @@ mod ui;
 use app::App;
 use config::Config;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Load configuration
     let config = match Config::load() {
         Ok(cfg) => cfg,
@@ -43,8 +44,40 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app and run
-    let mut app = App::new(config);
+    // Create app
+    let mut app = match App::new(config) {
+        Ok(app) => app,
+        Err(err) => {
+            // Restore terminal before showing error
+            disable_raw_mode()?;
+            execute!(
+                terminal.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            )?;
+            terminal.show_cursor()?;
+
+            eprintln!("Failed to initialize app: {}", err);
+            std::process::exit(1);
+        }
+    };
+
+    // Load initial data
+    if let Err(err) = app.load_pipelines().await {
+        // Restore terminal before showing error
+        disable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
+        terminal.show_cursor()?;
+
+        eprintln!("Failed to load pipelines: {}", err);
+        std::process::exit(1);
+    }
+
+    // Run app
     let result = app.run(&mut terminal);
 
     // Restore terminal

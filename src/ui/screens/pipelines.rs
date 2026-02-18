@@ -7,6 +7,7 @@ use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER, BORDER_FOCUSED,
     FG_BRIGHT, FG_DIM, FG_PRIMARY,
 };
+use crate::ui::widgets::spinner::Spinner;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -15,6 +16,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
+use std::collections::HashSet;
 
 /// Pipeline screen with dense list and filters
 pub struct PipelineScreen {
@@ -36,6 +38,18 @@ pub struct PipelineScreen {
     pub status_filter: Option<String>,
     /// Active input focus (0 = none, 1 = text filter, 2 = branch, 3 = status)
     pub filter_focus: u8,
+    /// Available branch options for cycling
+    pub branch_options: Vec<String>,
+    /// Current branch filter index
+    pub branch_filter_index: usize,
+    /// Status options for cycling
+    pub status_options: Vec<String>,
+    /// Current status filter index
+    pub status_filter_index: usize,
+    /// Spinner for loading state
+    pub spinner: Spinner,
+    /// Refreshing indicator
+    pub refreshing: bool,
 }
 
 impl PipelineScreen {
@@ -45,6 +59,28 @@ impl PipelineScreen {
         let filtered_pipelines = pipelines.clone();
         let mut list_state = ListState::default();
         list_state.select(Some(0));
+
+        // Extract unique branches from pipelines
+        let mut branches: Vec<String> = pipelines
+            .iter()
+            .map(|p| p.vcs.branch.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        branches.sort();
+
+        // Build branch options: "All" + unique branches
+        let mut branch_options = vec!["All".to_string()];
+        branch_options.extend(branches);
+
+        // Status options
+        let status_options = vec![
+            "All".to_string(),
+            "success".to_string(),
+            "failed".to_string(),
+            "running".to_string(),
+            "pending".to_string(),
+        ];
 
         Self {
             pipelines,
@@ -56,7 +92,19 @@ impl PipelineScreen {
             branch_filter: None,
             status_filter: None,
             filter_focus: 0,
+            branch_options,
+            branch_filter_index: 0,
+            status_options,
+            status_filter_index: 0,
+            spinner: Spinner::new("Loading pipelines..."),
+            refreshing: false,
         }
+    }
+
+    /// Set pipelines from external source (e.g., API)
+    pub fn set_pipelines(&mut self, pipelines: Vec<Pipeline>) {
+        self.pipelines = pipelines;
+        self.apply_filters();
     }
 
     /// Apply filters to the pipeline list
@@ -73,9 +121,16 @@ impl PipelineScreen {
                         || p.vcs.commit_author_name.to_lowercase().contains(&query)
                 };
 
-                // Branch filter
+                // Branch filter - match exact branch or branch pattern (e.g., "feat/*")
                 let branch_match = if let Some(ref branch) = self.branch_filter {
-                    &p.vcs.branch == branch
+                    if branch.ends_with("/*") {
+                        // Pattern matching: "feat/*" matches "feat/oauth", "feat/metrics", etc.
+                        let prefix = &branch[..branch.len() - 2]; // Remove "/*"
+                        p.vcs.branch.starts_with(prefix)
+                    } else {
+                        // Exact match
+                        &p.vcs.branch == branch
+                    }
                 } else {
                     true
                 };
@@ -103,8 +158,53 @@ impl PipelineScreen {
         }
     }
 
+    /// Extract unique branches from pipelines
+    pub fn get_unique_branches(&self) -> Vec<String> {
+        let mut branches: Vec<String> = self.pipelines
+            .iter()
+            .map(|p| p.vcs.branch.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        branches.sort();
+        branches
+    }
+
+    /// Cycle to the next branch filter option
+    pub fn cycle_branch_filter(&mut self) {
+        self.branch_filter_index = (self.branch_filter_index + 1) % self.branch_options.len();
+
+        if self.branch_filter_index == 0 {
+            // "All" option
+            self.branch_filter = None;
+        } else {
+            self.branch_filter = Some(self.branch_options[self.branch_filter_index].clone());
+        }
+
+        self.apply_filters();
+    }
+
+    /// Cycle to the next status filter option
+    pub fn cycle_status_filter(&mut self) {
+        self.status_filter_index = (self.status_filter_index + 1) % self.status_options.len();
+
+        if self.status_filter_index == 0 {
+            // "All" option
+            self.status_filter = None;
+        } else {
+            self.status_filter = Some(self.status_options[self.status_filter_index].clone());
+        }
+
+        self.apply_filters();
+    }
+
     /// Render the pipeline screen
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        // Reset refreshing indicator after first render
+        if self.refreshing {
+            self.refreshing = false;
+        }
+
         // Main layout: Header | Filter Bar | List | Footer
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -212,45 +312,103 @@ impl PipelineScreen {
 
     /// Render pipeline list with multi-line items (glim-style dense layout)
     fn render_pipeline_list(&mut self, f: &mut Frame, area: Rect) {
-        let selected_idx = self.selected_index;
-
-        // Create multi-line list items (3 lines per pipeline)
-        let items: Vec<ListItem> = self
-            .filtered_pipelines
-            .iter()
-            .enumerate()
-            .map(|(idx, pipeline)| {
-                let is_selected = selected_idx == Some(idx);
-                render_pipeline_multiline(pipeline, is_selected)
-            })
-            .collect();
-
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(BORDER_FOCUSED))
             .style(Style::default().bg(BG_PANEL));
 
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(Style::default());
+        // Check if loading or empty
+        if self.loading {
+            // Show loading spinner
+            self.spinner.tick();
+            let inner = block.inner(area);
+            f.render_widget(block, area);
 
-        f.render_stateful_widget(list, area, &mut self.list_state);
+            let spinner_widget = self.spinner.render();
+            f.render_widget(spinner_widget, inner);
+        } else if self.filtered_pipelines.is_empty() {
+            // Show empty state message
+            let inner = block.inner(area);
+            f.render_widget(block, area);
+
+            let empty_message = Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "No pipelines found.",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Try adjusting filters or press 'r' to refresh.",
+                    Style::default().fg(FG_DIM),
+                )),
+            ])
+            .alignment(Alignment::Center);
+
+            f.render_widget(empty_message, inner);
+        } else if self.refreshing {
+            // Show refreshing indicator briefly
+            let title = format!(" {} Refreshing... ", self.spinner.current_frame());
+            let block = Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(BORDER_FOCUSED))
+                .style(Style::default().bg(BG_PANEL));
+
+            let selected_idx = self.selected_index;
+            let items: Vec<ListItem> = self
+                .filtered_pipelines
+                .iter()
+                .enumerate()
+                .map(|(idx, pipeline)| {
+                    let is_selected = selected_idx == Some(idx);
+                    render_pipeline_multiline(pipeline, is_selected)
+                })
+                .collect();
+
+            let list = List::new(items)
+                .block(block)
+                .highlight_style(Style::default());
+
+            f.render_stateful_widget(list, area, &mut self.list_state);
+        } else {
+            // Normal rendering
+            let selected_idx = self.selected_index;
+            let items: Vec<ListItem> = self
+                .filtered_pipelines
+                .iter()
+                .enumerate()
+                .map(|(idx, pipeline)| {
+                    let is_selected = selected_idx == Some(idx);
+                    render_pipeline_multiline(pipeline, is_selected)
+                })
+                .collect();
+
+            let list = List::new(items)
+                .block(block)
+                .highlight_style(Style::default());
+
+            f.render_stateful_widget(list, area, &mut self.list_state);
+        }
     }
 
     /// Render footer with actions
     fn render_footer(&self, f: &mut Frame, area: Rect) {
         let footer = Paragraph::new(Line::from(vec![
             Span::styled("[↑↓]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Navigate  ", Style::default().fg(FG_PRIMARY)),
+            Span::styled(" Nav  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[⏎]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Span::styled(" Open  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[r]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Refresh  ", Style::default().fg(FG_PRIMARY)),
+            Span::styled("[Tab]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" Cycle  ", Style::default().fg(FG_PRIMARY)),
+            Span::styled("[Space]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" Toggle  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[/]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Span::styled(" Filter  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[q]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" Quit", Style::default().fg(FG_PRIMARY)),
+            Span::styled("[Esc]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(" Clear", Style::default().fg(FG_PRIMARY)),
         ]))
         .alignment(Alignment::Center);
 
@@ -271,13 +429,48 @@ impl PipelineScreen {
                 false
             }
             KeyCode::Enter => {
-                // Only open if we have a selection
-                self.selected_index.is_some()
+                // If branch or status filter is focused, cycle the filter
+                if self.filter_focus == 2 {
+                    self.cycle_branch_filter();
+                    false
+                } else if self.filter_focus == 3 {
+                    self.cycle_status_filter();
+                    false
+                } else {
+                    // Only open if we have a selection and not in filter mode
+                    self.filter_focus == 0 && self.selected_index.is_some()
+                }
+            }
+            KeyCode::Tab => {
+                // Cycle through filter focus: 0 → 1 → 2 → 3 → 0
+                self.filter_focus = (self.filter_focus + 1) % 4;
+                false
+            }
+            KeyCode::Char(' ') => {
+                // Space toggles branch/status filters when focused
+                if self.filter_focus == 2 {
+                    self.cycle_branch_filter();
+                    false
+                } else if self.filter_focus == 3 {
+                    self.cycle_status_filter();
+                    false
+                } else if self.filter_focus == 1 {
+                    // Space is a valid character in text filter
+                    self.filter_text.push(' ');
+                    self.apply_filters();
+                    false
+                } else {
+                    false
+                }
             }
             KeyCode::Char('r') => {
                 // Refresh: reload mock data and reapply filters
+                self.refreshing = true;
+                self.spinner.set_message("Refreshing...");
                 self.pipelines = mock_data::mock_pipelines();
                 self.apply_filters();
+                // Note: In a real app, this would be async and we'd set refreshing to false
+                // after the API call completes. For now, it will be reset on next render.
                 false
             }
             KeyCode::Char('/') => {
@@ -298,8 +491,14 @@ impl PipelineScreen {
                 false
             }
             KeyCode::Esc if self.filter_focus > 0 => {
-                // Exit filter mode
+                // Exit filter mode and reset all filters
                 self.filter_focus = 0;
+                self.filter_text.clear();
+                self.branch_filter = None;
+                self.branch_filter_index = 0;
+                self.status_filter = None;
+                self.status_filter_index = 0;
+                self.apply_filters();
                 false
             }
             _ => false,
