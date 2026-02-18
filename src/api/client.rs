@@ -1,8 +1,9 @@
 use super::error::ApiError;
-use super::models::{ExecutorInfo, Job, Pipeline, TriggerInfo, VcsInfo, Workflow};
+use super::models::{ExecutorInfo, Job, JobStep, Pipeline, StepAction, TriggerInfo, VcsInfo, Workflow};
 use chrono::{DateTime, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use serde::Deserialize;
+use serde_json::Value;
 use std::time::Duration;
 
 /// CircleCI API v2 client
@@ -288,9 +289,30 @@ impl CircleCIClient {
     /// * `workflow_id` - Workflow ID
     ///
     /// # Returns
-    /// List of jobs for the workflow
-    pub async fn get_jobs(&self, workflow_id: &str) -> Result<Vec<Job>, ApiError> {
-        let url = format!("{}/workflow/{}/job", self.base_url, workflow_id);
+    /// Tuple of (jobs, next_page_token)
+    pub async fn get_jobs(&self, workflow_id: &str) -> Result<(Vec<Job>, Option<String>), ApiError> {
+        self.get_jobs_page(workflow_id, None).await
+    }
+
+    /// Fetch jobs for a workflow with pagination support
+    ///
+    /// # Arguments
+    /// * `workflow_id` - Workflow ID
+    /// * `page_token` - Optional page token for pagination
+    ///
+    /// # Returns
+    /// Tuple of (jobs, next_page_token)
+    pub async fn get_jobs_page(
+        &self,
+        workflow_id: &str,
+        page_token: Option<&str>,
+    ) -> Result<(Vec<Job>, Option<String>), ApiError> {
+        let mut url = format!("{}/workflow/{}/job", self.base_url, workflow_id);
+
+        // Add page token if provided
+        if let Some(token) = page_token {
+            url = format!("{}?page-token={}", url, token);
+        }
 
         // Make API request
         let response = self.client.get(&url).send().await?;
@@ -341,7 +363,230 @@ impl CircleCIClient {
             })
             .collect();
 
-        Ok(jobs)
+        Ok((jobs, job_response.next_page_token))
+    }
+
+    /// Rerun a workflow
+    ///
+    /// # Arguments
+    /// * `workflow_id` - Workflow ID to rerun
+    ///
+    /// # Returns
+    /// Result indicating success or failure
+    pub async fn rerun_workflow(&self, workflow_id: &str) -> Result<(), ApiError> {
+        let url = format!("{}/workflow/{}/rerun", self.base_url, workflow_id);
+
+        // Build request payload
+        let payload = serde_json::json!({
+            "from_failed": false
+        });
+
+        // Make API request
+        let response = self.client.post(&url).json(&payload).send().await?;
+
+        // Check for errors - 202 Accepted is success for rerun
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ApiError::Http(status, body));
+        }
+
+        Ok(())
+    }
+
+    /// Fetch steps for a job using v1.1 API
+    ///
+    /// The v2 API doesn't include step information, so we need to use the v1.1 API.
+    ///
+    /// # Arguments
+    /// * `job_number` - Job number
+    ///
+    /// # Returns
+    /// List of job steps with their actions
+    pub async fn get_job_steps(&self, job_number: u32) -> Result<Vec<JobStep>, ApiError> {
+        // Convert project slug from v2 format (gh/org/repo) to v1.1 format (github/org/repo)
+        let project_v1 = self.project_slug.replace("gh/", "github/");
+        let url = format!("https://circleci.com/api/v1.1/project/{}/{}", project_v1, job_number);
+
+        // Make API request with the same auth token
+        let response = self.client.get(&url).send().await?;
+
+        // Check for errors
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ApiError::Http(status, body));
+        }
+
+        // Parse response as generic JSON first
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|e| ApiError::Parse(format!("Failed to parse job details: {}", e)))?;
+
+        // Extract steps array
+        let steps_array = json
+            .get("steps")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| ApiError::Parse("No steps field in response".to_string()))?;
+
+        // Parse steps
+        let mut steps = Vec::new();
+        for step_value in steps_array {
+            let step_name = step_value
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown step")
+                .to_string();
+
+            let empty_vec = Vec::new();
+            let actions_array = step_value
+                .get("actions")
+                .and_then(|v| v.as_array())
+                .unwrap_or(&empty_vec);
+
+            let mut actions = Vec::new();
+            for (index, action_value) in actions_array.iter().enumerate() {
+                let action_name = action_value
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown action")
+                    .to_string();
+
+                let status = action_value
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let output_url = action_value
+                    .get("output_url")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                actions.push(StepAction {
+                    name: action_name,
+                    status: map_status(&status),
+                    output_url,
+                    index,
+                    log_output: Vec::new(), // Will be populated when fetching logs
+                });
+            }
+
+            // Determine step status from actions
+            let step_status = if actions.iter().any(|a| a.status == "failed") {
+                "failed".to_string()
+            } else if actions.iter().any(|a| a.status == "running") {
+                "running".to_string()
+            } else if actions.iter().all(|a| a.status == "success") {
+                "success".to_string()
+            } else {
+                "pending".to_string()
+            };
+
+            steps.push(JobStep {
+                name: step_name,
+                status: step_status,
+                actions,
+            });
+        }
+
+        Ok(steps)
+    }
+
+    /// Fetch log output from a URL
+    ///
+    /// CircleCI returns logs as a JSON array of log entries.
+    ///
+    /// # Arguments
+    /// * `output_url` - URL to fetch logs from (typically an S3 URL)
+    ///
+    /// # Returns
+    /// List of log lines
+    async fn fetch_log_output(&self, output_url: &str) -> Result<Vec<String>, ApiError> {
+        // Fetch log output (no auth needed for S3 URLs)
+        let response = reqwest::get(output_url)
+            .await
+            .map_err(|e| ApiError::Network(format!("Failed to fetch log output: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            return Err(ApiError::Http(status, "Failed to fetch log output".to_string()));
+        }
+
+        let text = response.text().await.map_err(|e| {
+            ApiError::Parse(format!("Failed to read log output: {}", e))
+        })?;
+
+        // Try to parse as JSON array
+        if let Ok(log_entries) = serde_json::from_str::<Vec<Value>>(&text) {
+            let mut lines = Vec::new();
+            for entry in log_entries {
+                if let Some(message) = entry.get("message").and_then(|v| v.as_str()) {
+                    // Split message by newlines and add each line
+                    for line in message.lines() {
+                        lines.push(line.to_string());
+                    }
+                }
+            }
+            Ok(lines)
+        } else {
+            // Fallback: treat as plain text
+            Ok(text.lines().map(|s| s.to_string()).collect())
+        }
+    }
+
+    /// Stream job logs by fetching all available logs
+    ///
+    /// For running jobs, this should be called periodically to get updates.
+    ///
+    /// # Arguments
+    /// * `job_number` - Job number to stream logs for
+    ///
+    /// # Returns
+    /// List of formatted log lines with timestamps
+    pub async fn stream_job_log(&self, job_number: u32) -> Result<Vec<String>, ApiError> {
+        let steps = self.get_job_steps(job_number).await?;
+        let mut all_logs = Vec::new();
+
+        for step in steps {
+            // Add step header
+            all_logs.push(format!("▸ {}", step.name));
+            all_logs.push(String::new());
+
+            for action in step.actions {
+                // Add action header
+                all_logs.push(format!("  {} {}",
+                    if action.status == "success" { "✓" }
+                    else if action.status == "failed" { "✗" }
+                    else if action.status == "running" { "●" }
+                    else { "○" },
+                    action.name
+                ));
+
+                // Fetch and add log output if available
+                if let Some(output_url) = &action.output_url {
+                    match self.fetch_log_output(output_url).await {
+                        Ok(lines) => {
+                            for line in lines {
+                                if !line.is_empty() {
+                                    all_logs.push(format!("    {}", line));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            all_logs.push(format!("    [Error fetching logs: {}]", e));
+                        }
+                    }
+                } else if action.status == "running" {
+                    all_logs.push("    [Waiting for output...]".to_string());
+                }
+
+                all_logs.push(String::new());
+            }
+        }
+
+        Ok(all_logs)
     }
 }
 

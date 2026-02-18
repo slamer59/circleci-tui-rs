@@ -16,6 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
+use std::time::Instant;
 
 /// Actions that can be triggered from the log modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,8 +27,6 @@ pub enum ModalAction {
     Close,
     /// Rerun the job
     Rerun,
-    /// SSH into the job
-    SSH,
 }
 
 /// Modal popup for displaying job logs
@@ -40,18 +39,65 @@ pub struct LogModal {
     scroll_offset: usize,
     /// Whether the modal is visible
     visible: bool,
+    /// Whether this job is streaming (running)
+    is_streaming: bool,
+    /// Last time logs were fetched
+    last_fetch: Instant,
+    /// Whether to auto-scroll to bottom
+    auto_scroll: bool,
 }
 
 impl LogModal {
     /// Create a new log modal for the given job
+    ///
+    /// Initial logs are empty - call `set_logs()` to populate them.
     pub fn new(job: Job) -> Self {
-        let log_lines = Self::load_mock_logs(&job);
+        let is_streaming = job.is_running();
         Self {
             job,
-            log_lines,
+            log_lines: vec!["Loading logs...".to_string()],
             scroll_offset: 0,
             visible: true,
+            is_streaming,
+            last_fetch: Instant::now(),
+            auto_scroll: is_streaming,
         }
+    }
+
+    /// Set the log lines to display
+    pub fn set_logs(&mut self, logs: Vec<String>) {
+        self.log_lines = logs;
+        self.last_fetch = Instant::now();
+
+        // Auto-scroll to bottom if enabled
+        if self.auto_scroll {
+            self.scroll_to_bottom();
+        }
+    }
+
+    /// Check if logs should be refreshed (for streaming jobs)
+    pub fn should_refresh(&self) -> bool {
+        self.is_streaming && self.last_fetch.elapsed().as_secs() >= 2
+    }
+
+    /// Get the job number for this modal
+    pub fn job_number(&self) -> u32 {
+        self.job.job_number
+    }
+
+    /// Check if this job is streaming
+    pub fn is_streaming(&self) -> bool {
+        self.is_streaming
+    }
+
+    /// Mark job as no longer streaming (completed)
+    pub fn set_completed(&mut self) {
+        self.is_streaming = false;
+    }
+
+    /// Scroll to the bottom of the logs
+    fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = self.log_lines.len().saturating_sub(1);
     }
 
     /// Render the modal to the frame
@@ -115,29 +161,60 @@ impl LogModal {
             "Still running".to_string()
         };
 
-        let header_text = vec![
-            Line::from(vec![
-                Span::styled("Status: ", Style::default().fg(FG_DIM)),
+        // Build status line with streaming indicator
+        let mut status_line_spans = vec![
+            Span::styled("Status: ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                format!("{} {}", self.job.status.to_uppercase(), status_icon),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+
+        // Add streaming indicator if job is running
+        if self.is_streaming {
+            status_line_spans.push(Span::styled("  ", Style::default()));
+            status_line_spans.push(Span::styled(
+                "● Live",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        status_line_spans.extend(vec![
+            Span::styled("  │  ", Style::default().fg(FG_DIM)),
+            Span::styled("Duration: ", Style::default().fg(FG_DIM)),
+            Span::styled(self.job.duration_formatted(), Style::default().fg(FG_PRIMARY)),
+            Span::styled("  │  ", Style::default().fg(FG_DIM)),
+            Span::styled("Executor: ", Style::default().fg(FG_DIM)),
+            Span::styled(&self.job.executor.executor_type, Style::default().fg(FG_PRIMARY)),
+        ]);
+
+        // Build second line with timestamps and last update
+        let mut time_line_spans = vec![
+            Span::styled("Started: ", Style::default().fg(FG_DIM)),
+            Span::styled(started_str, Style::default().fg(FG_PRIMARY)),
+            Span::styled("  │  ", Style::default().fg(FG_DIM)),
+            Span::styled("Stopped: ", Style::default().fg(FG_DIM)),
+            Span::styled(stopped_str, Style::default().fg(FG_PRIMARY)),
+        ];
+
+        // Add last update time for streaming logs
+        if self.is_streaming {
+            let seconds_ago = self.last_fetch.elapsed().as_secs();
+            time_line_spans.extend(vec![
+                Span::styled("  │  ", Style::default().fg(FG_DIM)),
+                Span::styled("Updated: ", Style::default().fg(FG_DIM)),
                 Span::styled(
-                    format!("{} {}", self.job.status.to_uppercase(), status_icon),
-                    Style::default()
-                        .fg(status_color)
-                        .add_modifier(Modifier::BOLD),
+                    format!("{}s ago", seconds_ago),
+                    Style::default().fg(ACCENT),
                 ),
-                Span::styled("  │  ", Style::default().fg(FG_DIM)),
-                Span::styled("Duration: ", Style::default().fg(FG_DIM)),
-                Span::styled(self.job.duration_formatted(), Style::default().fg(FG_PRIMARY)),
-                Span::styled("  │  ", Style::default().fg(FG_DIM)),
-                Span::styled("Executor: ", Style::default().fg(FG_DIM)),
-                Span::styled(&self.job.executor.executor_type, Style::default().fg(FG_PRIMARY)),
-            ]),
-            Line::from(vec![
-                Span::styled("Started: ", Style::default().fg(FG_DIM)),
-                Span::styled(started_str, Style::default().fg(FG_PRIMARY)),
-                Span::styled("  │  ", Style::default().fg(FG_DIM)),
-                Span::styled("Stopped: ", Style::default().fg(FG_DIM)),
-                Span::styled(stopped_str, Style::default().fg(FG_PRIMARY)),
-            ]),
+            ]);
+        }
+
+        let header_text = vec![
+            Line::from(status_line_spans),
+            Line::from(time_line_spans),
             Line::from(""),
         ];
 
@@ -193,8 +270,6 @@ impl LogModal {
             Span::styled(" Scroll  ", Style::default().fg(FG_DIM)),
             Span::styled("[r]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
             Span::styled(" Rerun  ", Style::default().fg(FG_DIM)),
-            Span::styled("[s]", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-            Span::styled(" SSH  ", Style::default().fg(FG_DIM)),
             Span::styled("│ ", Style::default().fg(FG_DIM)),
             Span::styled(
                 format!("Scroll: {}/{} lines ({}%)", current_line, total_lines, scroll_percent),
@@ -253,9 +328,10 @@ impl LogModal {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => ModalAction::Close,
             KeyCode::Char('r') => ModalAction::Rerun,
-            KeyCode::Char('s') => ModalAction::SSH,
             KeyCode::Up | KeyCode::Char('k') => {
                 self.scroll_up();
+                // Disable auto-scroll when user manually scrolls up
+                self.auto_scroll = false;
                 ModalAction::None
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -267,6 +343,8 @@ impl LogModal {
                 for _ in 0..10 {
                     self.scroll_up();
                 }
+                // Disable auto-scroll when user manually scrolls up
+                self.auto_scroll = false;
                 ModalAction::None
             }
             KeyCode::PageDown => {
@@ -278,10 +356,16 @@ impl LogModal {
             }
             KeyCode::Home => {
                 self.scroll_offset = 0;
+                // Disable auto-scroll when user manually scrolls
+                self.auto_scroll = false;
                 ModalAction::None
             }
             KeyCode::End => {
                 self.scroll_offset = self.log_lines.len().saturating_sub(1);
+                // Re-enable auto-scroll when user scrolls to end
+                if self.is_streaming {
+                    self.auto_scroll = true;
+                }
                 ModalAction::None
             }
             _ => ModalAction::None,

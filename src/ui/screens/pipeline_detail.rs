@@ -37,6 +37,10 @@ pub enum PipelineDetailAction {
     OpenJobLog(Job),
     /// Go back to pipelines screen
     Back,
+    /// Load more jobs (trigger pagination)
+    LoadMoreJobs,
+    /// Rerun a workflow
+    RerunWorkflow(String),
 }
 
 /// Pipeline detail screen with workflow tree and jobs list
@@ -65,6 +69,16 @@ pub struct PipelineDetailScreen {
     pub loading_workflows: bool,
     /// Loading jobs
     pub loading_jobs: bool,
+    /// Loading more jobs (pagination)
+    pub loading_more_jobs: bool,
+    /// Next page token for job pagination
+    pub next_page_token: Option<String>,
+    /// Total jobs count (estimated if more pages exist)
+    pub total_jobs_count: Option<usize>,
+    /// Show rerun confirmation modal
+    pub show_rerun_confirm: bool,
+    /// Workflow ID to rerun (if confirmation is shown)
+    pub confirm_workflow_id: Option<String>,
     /// Spinner for loading state
     pub spinner: Spinner,
 }
@@ -105,6 +119,11 @@ impl PipelineDetailScreen {
             job_list_state,
             loading_workflows: false,
             loading_jobs: false,
+            loading_more_jobs: false,
+            next_page_token: None,
+            show_rerun_confirm: false,
+            confirm_workflow_id: None,
+            total_jobs_count: None,
             spinner: Spinner::new("Loading..."),
         }
     }
@@ -127,6 +146,79 @@ impl PipelineDetailScreen {
         } else {
             self.selected_job_index = None;
             self.job_list_state.select(None);
+        }
+    }
+
+    /// Set jobs with pagination information
+    pub fn set_jobs_with_pagination(
+        &mut self,
+        jobs: Vec<Job>,
+        next_page_token: Option<String>,
+        total_count: Option<usize>,
+    ) {
+        self.jobs = jobs;
+        self.next_page_token = next_page_token;
+        self.total_jobs_count = total_count;
+
+        if !self.jobs.is_empty() {
+            self.selected_job_index = Some(0);
+            self.job_list_state.select(Some(0));
+        } else {
+            self.selected_job_index = None;
+            self.job_list_state.select(None);
+        }
+    }
+
+    /// Append more jobs from pagination
+    pub fn append_jobs(&mut self, jobs: Vec<Job>, next_page_token: Option<String>) {
+        let current_selected = self.selected_job_index;
+
+        self.jobs.extend(jobs);
+        self.next_page_token = next_page_token;
+
+        // Update total count if we know there are no more pages
+        if self.next_page_token.is_none() {
+            self.total_jobs_count = Some(self.jobs.len());
+        }
+
+        // Restore selection
+        if let Some(idx) = current_selected {
+            self.selected_job_index = Some(idx);
+            self.job_list_state.select(Some(idx));
+        }
+    }
+
+    /// Check if we can load more jobs
+    pub fn can_load_more(&self) -> bool {
+        self.next_page_token.is_some() && !self.loading_more_jobs
+    }
+
+    /// Get pagination info for display
+    fn get_pagination_info(&self) -> String {
+        let current_count = self.jobs.len();
+        let filtered_count = self.get_filtered_jobs().len();
+
+        if let Some(total) = self.total_jobs_count {
+            // We know the exact total
+            if self.show_only_failed || !self.job_filter.is_empty() {
+                format!("(Showing {} of {} total jobs)", filtered_count, total)
+            } else {
+                format!("(Showing {} of {})", current_count, total)
+            }
+        } else if self.next_page_token.is_some() {
+            // More pages exist, but we don't know the total
+            if self.show_only_failed || !self.job_filter.is_empty() {
+                format!("(Showing {} of {}+ total jobs)", filtered_count, current_count)
+            } else {
+                format!("(Showing {} of {}+)", current_count, current_count)
+            }
+        } else {
+            // All jobs loaded
+            if self.show_only_failed || !self.job_filter.is_empty() {
+                format!("(Showing {} of {} total jobs)", filtered_count, current_count)
+            } else {
+                format!("(All {} jobs loaded)", current_count)
+            }
         }
     }
 
@@ -226,6 +318,22 @@ impl PipelineDetailScreen {
                 } else {
                     self.selected_job_index = None;
                     self.job_list_state.select(None);
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Char('l') => {
+                // Load more jobs if pagination is available
+                if self.focus == PanelFocus::Jobs && self.can_load_more() {
+                    PipelineDetailAction::LoadMoreJobs
+                } else {
+                    PipelineDetailAction::None
+                }
+            }
+            KeyCode::Char('R') => {
+                // Trigger rerun workflow confirmation
+                if self.focus == PanelFocus::Workflows && !self.workflows.is_empty() {
+                    let workflow = &self.workflows[self.selected_workflow_index];
+                    return PipelineDetailAction::RerunWorkflow(workflow.id.clone());
                 }
                 PipelineDetailAction::None
             }
@@ -662,6 +770,32 @@ impl PipelineDetailScreen {
                 items.push(ListItem::new(vec![line1, line2]));
             }
 
+            // Add "Load More" button if pagination is available
+            if self.can_load_more() {
+                let load_more_text = if self.loading_more_jobs {
+                    "● Loading more jobs...".to_string()
+                } else {
+                    let count_info = self.get_pagination_info();
+                    format!("[Load More Jobs] {}", count_info)
+                };
+
+                let load_more_line = Line::from(vec![
+                    Span::raw("     "),
+                    Span::styled(
+                        load_more_text,
+                        Style::default()
+                            .fg(if self.loading_more_jobs {
+                                RUNNING
+                            } else {
+                                ACCENT
+                            })
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]);
+
+                items.push(ListItem::new(vec![Line::from(""), load_more_line]));
+            }
+
             let list = List::new(items)
                 .block(block)
                 .highlight_style(
@@ -710,7 +844,7 @@ impl PipelineDetailScreen {
 
     /// Render footer with keyboard shortcuts
     fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let footer = Paragraph::new(Line::from(vec![
+        let mut footer_items = vec![
             Span::styled("[↑↓]", Style::default().fg(ACCENT)),
             Span::styled(" Nav  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[Tab]", Style::default().fg(ACCENT)),
@@ -719,10 +853,24 @@ impl PipelineDetailScreen {
             Span::styled(" View Logs  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[f]", Style::default().fg(ACCENT)),
             Span::styled(" Filter Failed  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[Esc]", Style::default().fg(ACCENT)),
-            Span::styled(" Back", Style::default().fg(FG_PRIMARY)),
-        ]))
-        .alignment(Alignment::Center);
+        ];
+
+        // Add "Load More" to footer if pagination is available
+        if self.can_load_more() && self.focus == PanelFocus::Jobs {
+            footer_items.push(Span::styled("[l]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled(" Load More  ", Style::default().fg(FG_PRIMARY)));
+        }
+        // Add "Rerun Workflow" to footer if focused on workflows panel
+        if self.focus == PanelFocus::Workflows {
+            footer_items.push(Span::styled("[R]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled(" Rerun Workflow  ", Style::default().fg(FG_PRIMARY)));
+        }
+
+        footer_items.push(Span::styled("[Esc]", Style::default().fg(ACCENT)));
+        footer_items.push(Span::styled(" Back", Style::default().fg(FG_PRIMARY)));
+
+        let footer = Paragraph::new(Line::from(footer_items))
+            .alignment(Alignment::Center);
 
         f.render_widget(footer, area);
     }

@@ -8,6 +8,7 @@ use crate::api::models::{Job, Pipeline};
 use crate::config::Config;
 use crate::ui::screens::{PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
 use crate::ui::widgets::log_modal::{LogModal, ModalAction};
+use crate::ui::widgets::confirm_modal::{ConfirmModal, ConfirmAction};
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{backend::Backend, Frame, Terminal};
@@ -41,6 +42,10 @@ pub struct App {
     pub api_client: Arc<CircleCIClient>,
     /// Loading state
     pub is_loading: bool,
+    /// Confirmation modal for actions like rerun workflow
+    pub confirm_modal: Option<ConfirmModal>,
+    /// Status message to display to the user
+    pub status_message: Option<String>,
 }
 
 impl App {
@@ -60,6 +65,8 @@ impl App {
             should_quit: false,
             config,
             api_client,
+            confirm_modal: None,
+            status_message: None,
             is_loading: false,
         })
     }
@@ -92,7 +99,7 @@ impl App {
     }
 
     /// Handle input events
-    fn handle_event(&mut self, key: KeyEvent) -> Result<()> {
+    pub fn handle_event(&mut self, key: KeyEvent) -> Result<()> {
         // Global quit handler
         if key.code == KeyCode::Char('q') {
             self.should_quit = true;
@@ -110,14 +117,40 @@ impl App {
                     // TODO: Implement rerun functionality
                     self.close_log_modal();
                 }
-                ModalAction::SSH => {
-                    // TODO: Implement SSH functionality
-                }
                 ModalAction::None => {
                     // Continue showing modal
                 }
             }
 
+            // Modal consumes all input when open
+            return Ok(());
+        }
+
+        // Priority 1.5: If confirmation modal is open, handle confirm input
+        if let Some(modal) = &mut self.confirm_modal {
+            match modal.handle_input(key) {
+                ConfirmAction::Yes => {
+                    // User confirmed - execute rerun workflow
+                    self.confirm_modal = None;
+                    // Trigger rerun if we have a workflow_id stored
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        if let Some(workflow_id) = &detail.confirm_workflow_id {
+                            // Set status message - the actual API call should be made asynchronously
+                            self.status_message = Some(format!("Rerunning workflow {}...", workflow_id));
+                            // Note: In a real async implementation, you would call:
+                            // tokio::spawn(self.api_client.rerun_workflow(workflow_id.clone()));
+                        }
+                        detail.confirm_workflow_id = None;
+                    }
+                }
+                ConfirmAction::No => {
+                    // User cancelled - close modal
+                    self.confirm_modal = None;
+                }
+                ConfirmAction::None => {
+                    // Continue showing modal
+                }
+            }
             // Modal consumes all input when open
             return Ok(());
         }
@@ -149,6 +182,27 @@ impl App {
                         PipelineDetailAction::OpenJobLog(job) => {
                             self.open_job_log_modal(job);
                         }
+                        PipelineDetailAction::LoadMoreJobs => {
+                            // Note: This triggers an async load_more_jobs call
+                            // The actual loading should be handled in the main event loop
+                            // For now, this is a placeholder for the action
+                        }
+                        PipelineDetailAction::RerunWorkflow(workflow_id) => {
+                            // Show confirmation modal
+                            if let Some(detail) = &self.pipeline_detail_screen {
+                                let workflow = detail.workflows.iter()
+                                    .find(|w| w.id == workflow_id)
+                                    .cloned();
+                                if let Some(workflow) = workflow {
+                                    let message = format!("Rerun workflow: {}?", workflow.name);
+                                    self.confirm_modal = Some(ConfirmModal::new(message));
+                                    // Store workflow_id in detail screen for later use
+                                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                                        detail.confirm_workflow_id = Some(workflow_id);
+                                    }
+                                }
+                            }
+                        }
                         PipelineDetailAction::None => {
                             // No action needed
                         }
@@ -161,7 +215,7 @@ impl App {
     }
 
     /// Render the current screen
-    fn render(&mut self, f: &mut Frame) {
+    pub fn render(&mut self, f: &mut Frame) {
         let area = f.size();
 
         // Render base screen
@@ -178,6 +232,10 @@ impl App {
 
         // Render modal on top if open
         if let Some(modal) = &mut self.log_modal {
+            modal.render(f, area);
+        }
+        // Render confirmation modal on top if open
+        if let Some(modal) = &self.confirm_modal {
             modal.render(f, area);
         }
     }
@@ -254,16 +312,92 @@ impl App {
     pub async fn load_jobs(&mut self, workflow_id: &str) -> Result<()> {
         self.is_loading = true;
 
-        // Fetch jobs from API
-        let jobs = self.api_client.get_jobs(workflow_id).await?;
+        // Fetch jobs from API (returns tuple with pagination info)
+        let (jobs, next_page_token) = self.api_client.get_jobs(workflow_id).await?;
 
-        // Update detail screen with jobs
+        // Update detail screen with jobs and pagination info
         if let Some(detail) = &mut self.pipeline_detail_screen {
-            detail.set_jobs(jobs);
+            detail.set_jobs_with_pagination(jobs, next_page_token, None);
         }
 
         self.is_loading = false;
         Ok(())
+    }
+
+    /// Load more jobs for the current workflow (pagination)
+    ///
+    /// This is an async method that fetches the next page of jobs.
+    pub async fn load_more_jobs(&mut self, workflow_id: &str) -> Result<()> {
+        // Get the next page token from the detail screen
+        let page_token = if let Some(detail) = &self.pipeline_detail_screen {
+            detail.next_page_token.clone()
+        } else {
+            return Ok(());
+        };
+
+        if let Some(token) = page_token {
+            // Set loading state
+            if let Some(detail) = &mut self.pipeline_detail_screen {
+                detail.loading_more_jobs = true;
+            }
+
+            // Fetch next page of jobs
+            let (jobs, next_page_token) = self
+                .api_client
+                .get_jobs_page(workflow_id, Some(&token))
+                .await?;
+
+            // Append jobs to existing list
+            if let Some(detail) = &mut self.pipeline_detail_screen {
+                detail.append_jobs(jobs, next_page_token);
+                detail.loading_more_jobs = false;
+            }
+        }
+
+        Ok(())
+    }
+    /// Rerun a workflow
+    ///
+    /// This is an async method that triggers a workflow rerun.
+    pub async fn rerun_workflow(&mut self, workflow_id: &str) -> Result<()> {
+        // Call API to rerun workflow
+        match self.api_client.rerun_workflow(workflow_id).await {
+            Ok(_) => {
+                self.status_message = Some(format!("Workflow {} rerun successfully", workflow_id));
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Failed to rerun workflow: {}", e));
+            }
+        }
+        Ok(())
+    }
+
+
+    /// Load logs for a job
+    ///
+    /// This is an async method that fetches job logs and updates the modal.
+    pub async fn load_job_logs(&mut self, job_number: u32) -> Result<()> {
+        // Fetch logs from API
+        let logs = self.api_client.stream_job_log(job_number).await?;
+
+        // Update modal with logs
+        if let Some(modal) = &mut self.log_modal {
+            modal.set_logs(logs);
+        }
+
+        Ok(())
+    }
+
+    /// Check if the log modal needs to refresh logs
+    ///
+    /// This should be called in the event loop to auto-refresh streaming logs.
+    pub fn should_refresh_logs(&self) -> Option<u32> {
+        if let Some(modal) = &self.log_modal {
+            if modal.should_refresh() {
+                return Some(modal.job_number());
+            }
+        }
+        None
     }
 }
 

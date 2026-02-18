@@ -22,6 +22,43 @@ mod ui;
 
 use app::App;
 use config::Config;
+use crossterm::event::{self, Event, KeyEventKind};
+use ratatui::backend::Backend;
+use std::time::Duration;
+
+/// Run the application with async support for log streaming
+async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()> {
+    loop {
+        // Draw the UI
+        terminal.draw(|f| app.render(f))?;
+
+        // Check if we need to refresh logs for streaming jobs
+        if let Some(job_number) = app.should_refresh_logs() {
+            // Spawn a task to load logs without blocking the UI
+            if let Err(e) = app.load_job_logs(job_number).await {
+                // Silently ignore errors for now, could add error handling later
+                eprintln!("Error loading logs: {}", e);
+            }
+        }
+
+        // Handle input events with a timeout
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                // Only process key press events, not key release
+                if key.kind == KeyEventKind::Press {
+                    app.handle_event(key)?;
+                }
+            }
+        }
+
+        // Check if we should quit
+        if app.should_quit {
+            break;
+        }
+    }
+
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -77,8 +114,8 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    // Run app
-    let result = app.run(&mut terminal);
+    // Run app with async event loop
+    let result = run_app(&mut app, &mut terminal).await;
 
     // Restore terminal
     disable_raw_mode()?;

@@ -91,6 +91,28 @@ impl Job {
             "pending".to_string()
         }
     }
+
+    /// Check if this job is currently running
+    pub fn is_running(&self) -> bool {
+        self.status == "running" && self.stopped_at.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobStep {
+    pub name: String,
+    pub status: String,
+    pub actions: Vec<StepAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepAction {
+    pub name: String,
+    pub status: String,
+    pub output_url: Option<String>,
+    pub index: usize,
+    #[serde(skip)]
+    pub log_output: Vec<String>,
 }
 
 pub mod mock_data {
