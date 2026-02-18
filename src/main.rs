@@ -32,6 +32,14 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
         // Draw the UI
         terminal.draw(|f| app.render(f))?;
 
+        // Check if we need to load logs (initial load for newly opened modal)
+        if let Some(job_number) = app.pending_log_load {
+            app.pending_log_load = None;
+            if let Err(e) = app.load_job_logs(job_number).await {
+                eprintln!("Error loading logs: {}", e);
+            }
+        }
+
         // Check if we need to refresh logs for streaming jobs
         if let Some(job_number) = app.should_refresh_logs() {
             // Spawn a task to load logs without blocking the UI

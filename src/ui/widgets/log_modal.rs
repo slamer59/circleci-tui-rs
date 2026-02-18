@@ -46,6 +46,10 @@ pub struct LogModal {
     last_fetch: Instant,
     /// Whether to auto-scroll to bottom
     auto_scroll: bool,
+    /// Spinner animation frame (0-7)
+    spinner_frame: usize,
+    /// Whether logs are currently loading
+    is_loading: bool,
 }
 
 impl LogModal {
@@ -62,6 +66,8 @@ impl LogModal {
             is_streaming,
             last_fetch: Instant::now(),
             auto_scroll: is_streaming,
+            spinner_frame: 0,
+            is_loading: true,
         }
     }
 
@@ -69,11 +75,24 @@ impl LogModal {
     pub fn set_logs(&mut self, logs: Vec<String>) {
         self.log_lines = logs;
         self.last_fetch = Instant::now();
+        self.is_loading = false;
 
         // Auto-scroll to bottom if enabled
         if self.auto_scroll {
             self.scroll_to_bottom();
         }
+    }
+
+    /// Advance spinner animation frame
+    fn advance_spinner(&mut self) {
+        const SPINNER_FRAMES_COUNT: usize = 10;
+        self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES_COUNT;
+    }
+
+    /// Get current spinner character
+    fn spinner_char(&self) -> &'static str {
+        const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        SPINNER_FRAMES[self.spinner_frame % SPINNER_FRAMES.len()]
     }
 
     /// Check if logs should be refreshed (for streaming jobs)
@@ -105,6 +124,11 @@ impl LogModal {
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         if !self.visible {
             return;
+        }
+
+        // Advance spinner animation if loading
+        if self.is_loading {
+            self.advance_spinner();
         }
 
         // Calculate the centered modal area (80% width, 80% height)
@@ -233,6 +257,9 @@ impl LogModal {
         // Get available width for truncation (area width)
         let max_width = area.width as usize;
 
+        // Get current spinner character for loading message
+        let spinner = self.spinner_char();
+
         // Get the visible log lines with ANSI parsing and truncation
         let visible_lines: Vec<Line> = self
             .log_lines
@@ -240,15 +267,22 @@ impl LogModal {
             .skip(scroll_offset)
             .take(visible_height)
             .map(|line| {
-                // Truncate line to fit within the available width
-                let truncated = if line.len() > max_width {
-                    format!("{}…", &line[..max_width.saturating_sub(1)])
+                // If loading, add spinner to "Loading logs..." message
+                let display_line = if self.is_loading && line == "Loading logs..." {
+                    format!("Loading logs... {}", spinner)
                 } else {
                     line.to_string()
                 };
 
+                // Truncate line to fit within the available width
+                let truncated = if display_line.len() > max_width {
+                    format!("{}…", &display_line[..max_width.saturating_sub(1)])
+                } else {
+                    display_line
+                };
+
                 // Parse ANSI codes and convert to Ratatui styled text
-                match truncated.into_text() {
+                match truncated.as_str().into_text() {
                     Ok(text) => {
                         // Convert ansi-to-tui Line to ratatui Line
                         if text.lines.is_empty() {
