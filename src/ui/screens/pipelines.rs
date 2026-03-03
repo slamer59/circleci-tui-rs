@@ -825,7 +825,7 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
 
     // Calculate time ago
     let time_ago = format_time_ago(&pipeline.created_at);
-    let time_str = pipeline.created_at.format("%H:%M").to_string();
+    let time_str = format_timestamp_with_date(&pipeline.created_at);
 
     // Calculate duration (from created to updated)
     let duration = format_duration(pipeline.created_at, pipeline.updated_at);
@@ -838,7 +838,7 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
                 Style::default().fg(status_col).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:<5} ", time_str),
+                format!("{:<11} ", time_str),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -855,7 +855,7 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
     } else {
         Line::from(vec![
             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
-            Span::styled(format!("{:<5} ", time_str), Style::default().fg(FG_DIM)),
+            Span::styled(format!("{:<11} ", time_str), Style::default().fg(FG_DIM)),
             Span::styled(
                 format!("Pipeline #{:<6} ", pipeline.number),
                 Style::default().fg(FG_PRIMARY),
@@ -891,6 +891,38 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
 
     // Combine all lines into a ListItem
     ListItem::new(vec![line1, line2, line3])
+}
+
+/// Format timestamp with date context for clarity
+/// Examples: "Today 09:49", "Yesterday 17:49", "Mon 16:00", "Mar 1"
+fn format_timestamp_with_date(timestamp: &chrono::DateTime<chrono::Utc>) -> String {
+    use chrono::{Local, Timelike, Datelike};
+
+    // Convert to local time for display
+    let local_time = timestamp.with_timezone(&Local);
+    let now = Local::now();
+
+    // Calculate days difference
+    let days_diff = (now.date_naive() - local_time.date_naive()).num_days();
+
+    match days_diff {
+        0 => {
+            // Today: show "Today HH:MM"
+            format!("Tdy {}", local_time.format("%H:%M"))
+        }
+        1 => {
+            // Yesterday: show "Yesterday HH:MM"
+            format!("Ydy {}", local_time.format("%H:%M"))
+        }
+        2..=6 => {
+            // This week: show "Mon HH:MM"
+            format!("{}", local_time.format("%a %H:%M"))
+        }
+        _ => {
+            // Older: show "Mar 1" or "Jan 15"
+            format!("{}", local_time.format("%b %-d"))
+        }
+    }
 }
 
 /// Format time ago (e.g., "2h ago", "45m ago")
