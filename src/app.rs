@@ -386,6 +386,11 @@ impl App {
                                 }
                             }
                         }
+                        PipelineDetailAction::CopyLogs(_job_number) => {
+                            // Copy logs action - the screen handles the copy internally,
+                            // we just need to check if there's a pending log fetch
+                            // This will be checked in the async processing loop below
+                        }
                         PipelineDetailAction::None => {
                             // No action needed
                         }
@@ -747,6 +752,33 @@ impl App {
             detail.loading_jobs = true;
         }
         self.pending_job_load = Some(workflow_id);
+    }
+
+    /// Check if pipeline detail screen needs to fetch logs for powerline
+    pub fn should_fetch_powerline_logs(&self) -> Option<u32> {
+        self.pipeline_detail_screen
+            .as_ref()
+            .and_then(|detail| detail.pending_log_fetch)
+    }
+
+    /// Fetch logs for powerline display and copy
+    pub async fn fetch_powerline_logs(&mut self, job_number: u32) -> Result<()> {
+        // Fetch logs from API
+        let logs = self.api_client.stream_job_log(job_number).await?;
+
+        // Pass logs to pipeline detail screen
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.set_logs_for_job(job_number, logs);
+        }
+
+        Ok(())
+    }
+
+    /// Tick powerline to handle notification expiry
+    pub fn tick_powerline(&mut self) {
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.tick_powerline();
+        }
     }
 
     /// Show an error modal with a message

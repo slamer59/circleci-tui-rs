@@ -8,6 +8,7 @@ pub mod job_item;
 pub mod log_modal;
 pub mod log_viewer;
 pub mod pipeline_item;
+pub mod powerline;
 pub mod spinner;
 pub mod ssh_modal;
 pub mod status_badge;

@@ -77,6 +77,17 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
             }
         }
 
+        // Check if pipeline detail screen needs to fetch logs for powerline
+        if let Some(job_number) = app.should_fetch_powerline_logs() {
+            // Fetch logs and pass to screen
+            if let Err(e) = app.fetch_powerline_logs(job_number).await {
+                app.show_api_error(e);
+            }
+        }
+
+        // Tick powerline to handle notification expiry
+        app.tick_powerline();
+
         // Handle input events with a timeout (50ms for smooth animations)
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {

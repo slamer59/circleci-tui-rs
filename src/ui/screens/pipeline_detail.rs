@@ -10,6 +10,7 @@ use crate::theme::{
 };
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
 use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
+use crate::ui::widgets::powerline::PowerlineBar;
 use crate::ui::widgets::spinner::Spinner;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -19,6 +20,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
+use std::collections::HashMap;
 
 /// Focus state for the pipeline detail screen
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +51,8 @@ pub enum PipelineDetailAction {
     RerunWorkflow(String),
     /// Load jobs for a workflow
     LoadJobs(String),
+    /// Copy logs for the specified job number
+    CopyLogs(u32),
 }
 
 /// Pipeline detail screen with workflow tree and jobs list
@@ -87,6 +91,12 @@ pub struct PipelineDetailScreen {
     pub confirm_workflow_id: Option<String>,
     /// Spinner for loading state
     pub spinner: Spinner,
+    /// Cache of fetched logs by job number
+    pub log_cache: HashMap<u32, Vec<String>>,
+    /// Pending log fetch request (job number)
+    pub pending_log_fetch: Option<u32>,
+    /// Powerline status bar
+    pub powerline: PowerlineBar,
 }
 
 impl PipelineDetailScreen {
@@ -158,6 +168,9 @@ impl PipelineDetailScreen {
             confirm_workflow_id: None,
             total_jobs_count: None,
             spinner: Spinner::new("Loading..."),
+            log_cache: HashMap::new(),
+            pending_log_fetch: None,
+            powerline: PowerlineBar::new(),
         }
     }
 
@@ -441,6 +454,17 @@ impl PipelineDetailScreen {
                 }
                 PipelineDetailAction::None
             }
+            KeyCode::Char('y') => {
+                // Copy logs for selected job
+                if self.focus == PanelFocus::Jobs {
+                    if let Some(job) = self.get_selected_job() {
+                        let job_number = job.job_number;
+                        self.handle_copy_logs(job_number);
+                        return PipelineDetailAction::CopyLogs(job_number);
+                    }
+                }
+                PipelineDetailAction::None
+            }
             KeyCode::Esc => PipelineDetailAction::Back,
             _ => PipelineDetailAction::None,
         }
@@ -553,15 +577,33 @@ impl PipelineDetailScreen {
 
     /// Render the pipeline detail screen
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        // Main layout: Header Panel (includes breadcrumb) | Body | Footer
-        let main_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(5), // Header panel (2 header + 1 breadcrumb + 2 borders)
-                Constraint::Min(0),    // Body
-                Constraint::Length(1), // Footer
-            ])
-            .split(area);
+        // Check if powerline should be visible (only when showing notification)
+        let show_powerline = !matches!(
+            self.powerline.content,
+            crate::ui::widgets::powerline::PowerlineContent::Empty
+        );
+
+        // Main layout: Header Panel (includes breadcrumb) | Body | Powerline (optional) | Footer
+        let main_chunks = if show_powerline {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(5), // Header panel (2 header + 1 breadcrumb + 2 borders)
+                    Constraint::Min(0),    // Body
+                    Constraint::Length(1), // Powerline (only when visible)
+                    Constraint::Length(1), // Footer
+                ])
+                .split(area)
+        } else {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(5), // Header panel (2 header + 1 breadcrumb + 2 borders)
+                    Constraint::Min(0),    // Body
+                    Constraint::Length(1), // Footer
+                ])
+                .split(area)
+        };
 
         // Render combined header panel
         self.render_header_panel(f, main_chunks[0]);
@@ -578,8 +620,15 @@ impl PipelineDetailScreen {
         // Render right panel (jobs list)
         self.render_jobs_panel(f, body_chunks[1]);
 
-        // Render footer
-        self.render_footer(f, main_chunks[2]);
+        // Render powerline if visible
+        if show_powerline {
+            self.powerline.render(f, main_chunks[2]);
+            // Render footer at index 3
+            self.render_footer(f, main_chunks[3]);
+        } else {
+            // Render footer at index 2 (no powerline)
+            self.render_footer(f, main_chunks[2]);
+        }
     }
 
     /// Render the combined header panel with pipeline information and breadcrumb
@@ -1027,9 +1076,16 @@ impl PipelineDetailScreen {
             Span::styled(" View Logs  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[s]", Style::default().fg(ACCENT)),
             Span::styled(" SSH  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[f]", Style::default().fg(ACCENT)),
-            Span::styled(" Filters  ", Style::default().fg(FG_PRIMARY)),
         ];
+
+        // Add [y]Copy when Jobs panel is focused and a job is selected
+        if self.focus == PanelFocus::Jobs && self.selected_job_index.is_some() {
+            footer_items.push(Span::styled("[y]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled(" Copy  ", Style::default().fg(FG_PRIMARY)));
+        }
+
+        footer_items.push(Span::styled("[f]", Style::default().fg(ACCENT)));
+        footer_items.push(Span::styled(" Filters  ", Style::default().fg(FG_PRIMARY)));
 
         // Add filter mode shortcuts if in filter mode
         if self.focus == PanelFocus::Filters {
@@ -1077,6 +1133,81 @@ impl PipelineDetailScreen {
         let footer = Paragraph::new(Line::from(footer_items)).alignment(Alignment::Center);
 
         f.render_widget(footer, area);
+    }
+
+    /// Get the currently selected job
+    pub fn get_selected_job(&self) -> Option<&Job> {
+        self.selected_job_index
+            .and_then(|idx| self.get_filtered_jobs().get(idx).map(|j| *j))
+    }
+
+    /// Handle copy logs action - checks cache or triggers fetch
+    pub fn handle_copy_logs(&mut self, job_number: u32) {
+        if let Some(logs) = self.log_cache.get(&job_number) {
+            // Logs are cached, copy immediately
+            match Self::copy_to_clipboard(&logs.join("\n")) {
+                Ok(_) => {
+                    self.powerline.set_notification(
+                        format!("Copied {} lines to clipboard", logs.len()),
+                        crate::ui::widgets::powerline::NotificationLevel::Success,
+                        std::time::Duration::from_secs(2),
+                    );
+                }
+                Err(err) => {
+                    self.powerline.set_notification(
+                        err,
+                        crate::ui::widgets::powerline::NotificationLevel::Error,
+                        std::time::Duration::from_secs(3),
+                    );
+                }
+            }
+        } else {
+            // Logs not cached, trigger fetch
+            self.powerline
+                .set_loading("Loading logs...".to_string());
+            self.pending_log_fetch = Some(job_number);
+        }
+    }
+
+    /// Store fetched logs and trigger copy
+    pub fn set_logs_for_job(&mut self, job_number: u32, logs: Vec<String>) {
+        // Store in cache
+        self.log_cache.insert(job_number, logs.clone());
+
+        // Clear pending fetch
+        self.pending_log_fetch = None;
+
+        // Copy to clipboard
+        match Self::copy_to_clipboard(&logs.join("\n")) {
+            Ok(_) => {
+                self.powerline.set_notification(
+                    format!("Copied {} lines to clipboard", logs.len()),
+                    crate::ui::widgets::powerline::NotificationLevel::Success,
+                    std::time::Duration::from_secs(2),
+                );
+            }
+            Err(err) => {
+                self.powerline.set_notification(
+                    err,
+                    crate::ui::widgets::powerline::NotificationLevel::Error,
+                    std::time::Duration::from_secs(3),
+                );
+            }
+        }
+    }
+
+    /// Copy text to system clipboard
+    fn copy_to_clipboard(text: &str) -> Result<(), String> {
+        use arboard::Clipboard;
+
+        Clipboard::new()
+            .and_then(|mut clipboard| clipboard.set_text(text))
+            .map_err(|e| format!("Clipboard unavailable: {}", e))
+    }
+
+    /// Update powerline state - call periodically to clear expired notifications
+    pub fn tick_powerline(&mut self) {
+        self.powerline.tick();
     }
 }
 

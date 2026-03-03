@@ -35,6 +35,7 @@ chrono = { version = "0.4.31", default-features = false, features = ["serde", "c
 url = "2.3"
 ansi-to-tui = "8.0"
 git2 = "0.18"
+arboard = "3.4"
 
 # Logging (optional, for debugging)
 # tracing = "0.1"
