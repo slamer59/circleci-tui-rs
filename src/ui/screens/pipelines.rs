@@ -818,19 +818,44 @@ impl Default for PipelineScreen {
     }
 }
 
-/// Render a pipeline as multi-line item (3 lines: status/time/branch, commit msg, summary)
+/// Render a pipeline as multi-line item (2 lines: new compact layout)
+/// Line 1: [status icon] [time] [#ID] [commit message] [stages] ([duration])
+/// Line 2: [branch] [∙ SHA] [@author] [🏷 tags]
 fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_> {
     let icon = get_status_icon(&pipeline.state);
     let status_col = get_status_color(&pipeline.state);
 
-    // Calculate time ago
-    let time_ago = format_time_ago(&pipeline.created_at);
-    let time_str = format_timestamp_with_date(&pipeline.created_at);
+    // Use relative time only (like GitHub/GitLab)
+    let time_str = format_time_ago(&pipeline.created_at);
 
     // Calculate duration (from created to updated)
     let duration = format_duration(pipeline.created_at, pipeline.updated_at);
 
-    // Line 1: ● [time] Pipeline #[num] [duration] ● [branch]
+    // Mock stage icons for now (4 stages all passed)
+    // TODO: Replace with real stage data
+    let stage_icons = match pipeline.state.as_str() {
+        "success" => "✓✓✓✓",
+        "failed" => "✓✓✗✗",
+        "running" => "✓✓○○",
+        "pending" => "◐◐◐◐",
+        _ => "●●●●",
+    };
+
+    // Extract first 7 chars of commit SHA
+    let sha = if pipeline.vcs.revision.len() >= 7 {
+        &pipeline.vcs.revision[..7]
+    } else {
+        &pipeline.vcs.revision
+    };
+
+    // Build tag string if trigger type is scheduled
+    let tag_str = if pipeline.trigger.trigger_type == "scheduled" {
+        " 🏷 scheduled"
+    } else {
+        ""
+    };
+
+    // Line 1: ✓ 2h ago  #1234  Add TTES template override  ✓✓✓✓ (2m 34s)
     let line1 = if selected {
         Line::from(vec![
             Span::styled(
@@ -838,59 +863,95 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
                 Style::default().fg(status_col).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:<11} ", time_str),
+                format!("{:<8}", time_str),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("Pipeline #{:<6} ", pipeline.number),
+                format!("  #{}  ", pipeline.number),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(format!("{:<10} ", time_ago), Style::default().fg(FG_DIM)),
-            Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
             Span::styled(
-                format!(" {}", pipeline.vcs.branch),
-                Style::default().fg(ACCENT),
+                format!("{}  ", pipeline.vcs.commit_subject),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{} ", stage_icons),
+                Style::default().fg(status_col).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("({})", duration),
+                Style::default().fg(FG_DIM),
             ),
         ])
     } else {
         Line::from(vec![
             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
-            Span::styled(format!("{:<11} ", time_str), Style::default().fg(FG_DIM)),
             Span::styled(
-                format!("Pipeline #{:<6} ", pipeline.number),
+                format!("{:<8}", time_str),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("  #{}  ", pipeline.number),
                 Style::default().fg(FG_PRIMARY),
             ),
-            Span::styled(format!("{:<10} ", time_ago), Style::default().fg(FG_DIM)),
-            Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
             Span::styled(
-                format!(" {}", pipeline.vcs.branch),
+                format!("{}  ", pipeline.vcs.commit_subject),
+                Style::default().fg(FG_PRIMARY),
+            ),
+            Span::styled(
+                format!("{} ", stage_icons),
+                Style::default().fg(status_col),
+            ),
+            Span::styled(
+                format!("({})", duration),
                 Style::default().fg(FG_DIM),
             ),
         ])
     };
 
-    // Line 2: Indented commit message
+    // Line 2: ⎇ fix/bug  ∙ a1b2c3d  @slamer59  🏷 scheduled
     let line2 = if selected {
-        Line::from(vec![Span::styled(
-            format!("          {}", pipeline.vcs.commit_subject),
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        )])
+        Line::from(vec![
+            Span::styled(
+                format!("          ⎇ {}  ", pipeline.vcs.branch),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("∙ {}  ", sha),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("@{}", pipeline.vcs.commit_author_name),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                tag_str,
+                Style::default().fg(FG_DIM),
+            ),
+        ])
     } else {
-        Line::from(vec![Span::styled(
-            format!("          {}", pipeline.vcs.commit_subject),
-            Style::default().fg(FG_PRIMARY),
-        )])
+        Line::from(vec![
+            Span::styled(
+                format!("          ⎇ {}  ", pipeline.vcs.branch),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("∙ {}  ", sha),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("@{}", pipeline.vcs.commit_author_name),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                tag_str,
+                Style::default().fg(FG_DIM),
+            ),
+        ])
     };
 
-    // Line 3: Indented summary (mock: 3 workflows • 24 jobs • 2 failed)
-    let summary = format!(
-        "          3 workflows • 24 jobs • {} ({})",
-        pipeline.state, duration
-    );
-    let line3 = Line::from(vec![Span::styled(summary, Style::default().fg(FG_DIM))]);
-
     // Combine all lines into a ListItem
-    ListItem::new(vec![line1, line2, line3])
+    ListItem::new(vec![line1, line2])
 }
 
 /// Format timestamp with date context for clarity
