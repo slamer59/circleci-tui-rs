@@ -953,8 +953,8 @@ fn create_pipeline_row<'a>(
     // Use relative time only (like GitHub/GitLab)
     let time_str = format_time_ago(&pipeline.created_at);
 
-    // Calculate duration (from created to updated)
-    let duration = format_duration(pipeline.created_at, pipeline.updated_at);
+    // Calculate duration from workflow execution times
+    let duration = pipeline.calculate_duration_from_workflows(workflows);
 
     // Generate stage icons from workflow statuses
     let stage_icons = if let Some(wfs) = workflows {
@@ -1126,23 +1126,6 @@ fn format_time_ago(timestamp: &chrono::DateTime<chrono::Utc>) -> String {
         format!("{}h ago", secs / 3600)
     } else {
         format!("{}d ago", secs / 86400)
-    }
-}
-
-/// Format duration between two timestamps
-fn format_duration(
-    start: chrono::DateTime<chrono::Utc>,
-    end: chrono::DateTime<chrono::Utc>,
-) -> String {
-    let duration = end.signed_duration_since(start);
-    let secs = duration.num_seconds();
-
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
     }
 }
 

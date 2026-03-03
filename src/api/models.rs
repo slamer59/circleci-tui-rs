@@ -13,6 +13,66 @@ pub struct Pipeline {
     pub project_slug: String,
 }
 
+impl Pipeline {
+    /// Calculate pipeline duration from workflow execution times
+    /// Returns the span from earliest workflow start to latest workflow completion
+    pub fn calculate_duration_from_workflows(&self, workflows: Option<&Vec<Workflow>>) -> String {
+        match workflows {
+            None => {
+                // No workflows loaded yet
+                "--".to_string()
+            }
+            Some(wfs) if wfs.is_empty() => {
+                // Pipeline has no workflows
+                "--".to_string()
+            }
+            Some(wfs) => {
+                // Find earliest created_at (when first workflow started)
+                let earliest_start = wfs
+                    .iter()
+                    .map(|w| w.created_at)
+                    .min();
+
+                // Find latest stopped_at (when last workflow completed)
+                let latest_stop = wfs
+                    .iter()
+                    .filter_map(|w| w.stopped_at)
+                    .max();
+
+                match (earliest_start, latest_stop) {
+                    (Some(start), Some(stop)) => {
+                        // Calculate duration in seconds
+                        let duration = stop.signed_duration_since(start);
+                        let secs = duration.num_seconds().max(0); // Ensure non-negative
+
+                        if secs < 60 {
+                            format!("{}s", secs)
+                        } else if secs < 3600 {
+                            let mins = secs / 60;
+                            let remaining_secs = secs % 60;
+                            if remaining_secs > 0 {
+                                format!("{}m {}s", mins, remaining_secs)
+                            } else {
+                                format!("{}m", mins)
+                            }
+                        } else {
+                            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+                        }
+                    }
+                    (Some(_start), None) => {
+                        // Workflows are still running (no stopped_at yet)
+                        "...".to_string()
+                    }
+                    _ => {
+                        // Edge case: workflows exist but have no timestamps
+                        "--".to_string()
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VcsInfo {
     pub branch: String,
