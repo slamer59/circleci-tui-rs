@@ -5,7 +5,7 @@
 /// - Right Panel (70%): Filtered jobs list for the selected workflow
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER, BORDER_FOCUSED, FG_BRIGHT, FG_DIM,
+    get_status_color, get_status_icon, ACCENT, BG_PANEL, FG_BRIGHT, FG_DIM,
     FG_PRIMARY, RUNNING,
 };
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
@@ -161,6 +161,22 @@ impl PipelineDetailScreen {
         }
     }
 
+    /// Get current filter preferences for saving
+    pub fn get_filter_preferences(&self) -> crate::preferences::PipelineDetailFilterPrefs {
+        use crate::preferences::PipelineDetailFilterPrefs;
+
+        PipelineDetailFilterPrefs {
+            status_index: self.faceted_search.get_facet_selection(0),
+            duration_index: self.faceted_search.get_facet_selection(1),
+        }
+    }
+
+    /// Apply saved filter preferences
+    pub fn apply_filter_preferences(&mut self, prefs: &crate::preferences::PipelineDetailFilterPrefs) {
+        self.faceted_search.set_facet_selection(0, prefs.status_index);
+        self.faceted_search.set_facet_selection(1, prefs.duration_index);
+    }
+
     /// Set workflows from external source (e.g., API)
     pub fn set_workflows(&mut self, workflows: Vec<Workflow>) {
         self.workflows = workflows;
@@ -311,12 +327,12 @@ impl PipelineDetailScreen {
                 let matches_duration = match duration_filter {
                     "All durations" => true,
                     "Quick (< 1min)" => job.duration.map(|d| d < 60).unwrap_or(false),
-                    "Short (1-5min)" => job.duration.map(|d| d >= 60 && d < 300).unwrap_or(false),
+                    "Short (1-5min)" => job.duration.map(|d| (60..300).contains(&d)).unwrap_or(false),
                     "Medium (5-15min)" => {
-                        job.duration.map(|d| d >= 300 && d < 900).unwrap_or(false)
+                        job.duration.map(|d| (300..900).contains(&d)).unwrap_or(false)
                     }
                     "Long (15-30min)" => {
-                        job.duration.map(|d| d >= 900 && d < 1800).unwrap_or(false)
+                        job.duration.map(|d| (900..1800).contains(&d)).unwrap_or(false)
                     }
                     "Very Long (>30min)" => job.duration.map(|d| d >= 1800).unwrap_or(false),
                     _ => true,
@@ -592,7 +608,7 @@ impl PipelineDetailScreen {
             .pipeline
             .project_slug
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or("project");
 
         let short_sha = if self.pipeline.vcs.revision.len() > 7 {

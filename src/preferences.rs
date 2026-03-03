@@ -19,8 +19,11 @@ pub struct UserPreferences {
     /// Cached CircleCI user information
     pub user: Option<CachedUser>,
 
-    /// Pipeline filter preferences
+    /// Pipeline list screen (Screen 1) filter preferences
     pub pipeline_filters: PipelineFilterPrefs,
+
+    /// Pipeline detail screen (Screen 2) filter preferences
+    pub detail_filters: PipelineDetailFilterPrefs,
 
     /// First-run detection flag
     pub first_run: bool,
@@ -58,12 +61,23 @@ pub struct PipelineFilterPrefs {
     pub search_text: String,
 }
 
+/// Pipeline detail screen (Screen 2) filter preferences
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineDetailFilterPrefs {
+    /// Status filter index: 0="All", 1="success", 2="running", 3="failed", 4="pending", 5="blocked"
+    pub status_index: usize,
+
+    /// Duration filter index: 0="All", 1="Quick", 2="Short", 3="Medium", 4="Long", 5="Very Long"
+    pub duration_index: usize,
+}
+
 impl Default for UserPreferences {
     fn default() -> Self {
         Self {
             version: 1,
             user: None,
             pipeline_filters: PipelineFilterPrefs::default(),
+            detail_filters: PipelineDetailFilterPrefs::default(),
             first_run: true,
         }
     }
@@ -77,6 +91,15 @@ impl Default for PipelineFilterPrefs {
             date_index: 0,       // First option
             status_index: 0,     // First option
             search_text: String::new(),
+        }
+    }
+}
+
+impl Default for PipelineDetailFilterPrefs {
+    fn default() -> Self {
+        Self {
+            status_index: 0,    // "All"
+            duration_index: 0,  // "All durations"
         }
     }
 }

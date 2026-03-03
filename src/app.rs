@@ -478,12 +478,15 @@ impl App {
     /// Opens the pipeline detail view showing workflow tree and jobs list.
     pub fn navigate_to_pipeline_detail(&mut self, pipeline: Pipeline) {
         // Create screen with empty data - workflows will be loaded async
-        self.pipeline_detail_screen = Some(PipelineDetailScreen::new(pipeline.clone()));
+        let mut detail_screen = PipelineDetailScreen::new(pipeline.clone());
 
-        // Set the screen to show loading state
-        if let Some(detail) = &mut self.pipeline_detail_screen {
-            detail.loading_workflows = true;
-        }
+        // Apply saved filter preferences
+        detail_screen.apply_filter_preferences(&self.preferences.get_preferences().detail_filters);
+
+        // Set loading state
+        detail_screen.loading_workflows = true;
+
+        self.pipeline_detail_screen = Some(detail_screen);
 
         // Trigger async workflow loading
         self.pending_workflow_load = Some(pipeline.id.clone());
@@ -795,11 +798,15 @@ impl App {
     /// Save current filter state to preferences
     /// Save current filter state to preferences
     pub fn save_preferences(&mut self) -> Result<()> {
-        // Extract current filter state from pipeline screen
+        // Extract current filter state from pipeline screen (Screen 1)
         let filter_prefs = self.pipeline_screen.get_filter_preferences();
-
-        // Update preferences
         self.preferences.get_preferences_mut().pipeline_filters = filter_prefs;
+
+        // Extract current filter state from detail screen (Screen 2) if active
+        if let Some(detail) = &self.pipeline_detail_screen {
+            let detail_prefs = detail.get_filter_preferences();
+            self.preferences.get_preferences_mut().detail_filters = detail_prefs;
+        }
 
         // Save to disk
         self.preferences.save()
