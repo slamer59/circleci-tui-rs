@@ -958,22 +958,22 @@ fn create_pipeline_row<'a>(
 
     // Generate stage icons from workflow statuses
     let stage_icons = if let Some(wfs) = workflows {
-        let icons: String = wfs
+        let icons: Vec<String> = wfs
             .iter()
             .take(5) // First 5 workflows only
-            .map(|w| get_status_icon(&w.status))
+            .map(|w| get_status_icon(&w.status).to_string())
             .collect();
 
         // Add overflow indicator if more than 5 workflows
         if wfs.len() > 5 {
-            format!("{}…", icons)
+            format!("{} …", icons.join(" "))
         } else if icons.is_empty() {
             "----".to_string() // No workflows
         } else {
-            icons
+            icons.join(" ")
         }
     } else {
-        "····".to_string() // Loading state
+        "· · · ·".to_string() // Loading state
     };
 
     // Extract first 7 chars of commit SHA
@@ -1056,7 +1056,7 @@ fn create_pipeline_row<'a>(
     let stages_line1 = if selected {
         Line::from(Span::styled(
             stage_icons,
-            Style::default().fg(status_col).add_modifier(Modifier::BOLD),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
     } else {
         Line::from(Span::styled(stage_icons, Style::default().fg(status_col)))
@@ -1065,7 +1065,14 @@ fn create_pipeline_row<'a>(
     let stages_cell = Cell::from(Text::from(vec![stages_line1, stages_line2]));
 
     // Cell 4: DURATION (duration on line 1, empty on line 2)
-    let duration_line1 = Line::from(Span::styled(duration, Style::default().fg(FG_DIM)));
+    let duration_line1 = if selected {
+        Line::from(Span::styled(
+            duration,
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        Line::from(Span::styled(duration, Style::default().fg(FG_DIM)))
+    };
     let duration_line2 = Line::from("        "); // 8 spaces to match column width
     let duration_cell = Cell::from(Text::from(vec![duration_line1, duration_line2]));
 
