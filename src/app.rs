@@ -6,6 +6,7 @@
 use crate::api::client::CircleCIClient;
 use crate::api::models::{Job, Pipeline};
 use crate::config::Config;
+use crate::preferences::PreferencesManager;
 use crate::ui::screens::{PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
 use crate::ui::widgets::confirm_modal::{ConfirmAction, ConfirmModal};
 use crate::ui::widgets::error_modal::{ErrorAction, ErrorModal};
@@ -65,20 +66,81 @@ pub struct App {
     pub pending_log_load: Option<u32>,
     /// Pending load more jobs (workflow_id)
     pub pending_load_more_jobs: Option<String>,
+    /// Authenticated CircleCI user (for "Mine" filter)
+    pub authenticated_user: Option<String>,
+    /// Preferences manager
+    pub preferences: PreferencesManager,
 }
 
 impl App {
     /// Create a new application instance
-    pub fn new(config: Config) -> Result<Self> {
+    pub async fn new(config: Config) -> Result<Self> {
+        // Load preferences
+        let mut preferences = PreferencesManager::load()?;
+
         // Create API client
         let api_client = Arc::new(CircleCIClient::new(
             config.circle_token.clone(),
             config.project_slug.clone(),
         )?);
 
+        // Fetch user identity if cache is stale
+        let (authenticated_user, authenticated_user_name) = if preferences.is_user_cache_stale() {
+            match api_client.get_me().await {
+                Ok(me) => {
+                    let login = me.login.clone();
+                    let name = me.name.clone();
+                    preferences.update_user_cache(login.clone(), name.clone());
+                    (Some(login), name)
+                }
+                Err(e) => {
+                    // Log warning, use cached value
+                    eprintln!("Warning: Failed to fetch user identity: {}", e);
+                    preferences
+                        .get_preferences()
+                        .user
+                        .as_ref()
+                        .map(|u| (Some(u.login.clone()), u.name.clone()))
+                        .unwrap_or((None, None))
+                }
+            }
+        } else {
+            preferences
+                .get_preferences()
+                .user
+                .as_ref()
+                .map(|u| (Some(u.login.clone()), u.name.clone()))
+                .unwrap_or((None, None))
+        };
+
+        // Apply first-run defaults (owner filter only)
+        if preferences.get_preferences().first_run {
+            let prefs = preferences.get_preferences_mut();
+            prefs.pipeline_filters.owner_index = 1; // "Mine"
+            preferences.clear_first_run();
+            preferences.save()?;
+        }
+
+        // Smart branch selection: LOCAL → GLOBAL
+        // Always use current git branch if available, otherwise use saved preference
+        let current_git_branch = crate::git::get_current_branch();
+        let branch_to_use = current_git_branch
+            .or_else(|| preferences.get_preferences().pipeline_filters.branch.clone());
+
+        // Create modified preferences with current branch priority
+        let mut filter_prefs = preferences.get_preferences().pipeline_filters.clone();
+        filter_prefs.branch = branch_to_use;
+
+        // Create PipelineScreen with adjusted preferences
+        let pipeline_screen = PipelineScreen::with_preferences(
+            &filter_prefs,
+            authenticated_user.clone(),
+            authenticated_user_name.clone(),
+        );
+
         Ok(Self {
             current_screen: Screen::Pipelines,
-            pipeline_screen: PipelineScreen::new(),
+            pipeline_screen,
             pipeline_detail_screen: None,
             log_modal: None,
             should_quit: false,
@@ -94,6 +156,8 @@ impl App {
             pending_job_load: None,
             pending_log_load: None,
             pending_load_more_jobs: None,
+            authenticated_user,
+            preferences,
         })
     }
 
@@ -468,8 +532,32 @@ impl App {
     pub async fn load_pipelines(&mut self) -> Result<()> {
         self.is_loading = true;
 
-        // Fetch pipelines from API (limit to 50)
-        let pipelines = self.api_client.get_pipelines(50).await?;
+        // Extract filters from pipeline screen
+        let owner_filter = self
+            .pipeline_screen
+            .faceted_search
+            .get_filter_value(0)
+            .unwrap_or("All pipelines");
+        let branch_filter = self
+            .pipeline_screen
+            .faceted_search
+            .get_filter_value(1);
+
+        // Convert filters to API parameters (server-side filtering)
+        let mine = owner_filter == "Mine";
+        let branch = if branch_filter == Some("All") {
+            None
+        } else {
+            branch_filter
+        };
+
+        // Fetch pipelines from API with server-side filters
+        // mine=true: Only pipelines I triggered (pushed, ran, etc.)
+        // branch=X: Only pipelines on specific branch
+        let pipelines = self
+            .api_client
+            .get_pipelines_filtered(100, branch, mine)
+            .await?;
 
         // Update pipeline screen with new data
         self.pipeline_screen.set_pipelines(pipelines);
@@ -704,6 +792,19 @@ impl App {
         ));
     }
 
+    /// Save current filter state to preferences
+    /// Save current filter state to preferences
+    pub fn save_preferences(&mut self) -> Result<()> {
+        // Extract current filter state from pipeline screen
+        let filter_prefs = self.pipeline_screen.get_filter_preferences();
+
+        // Update preferences
+        self.preferences.get_preferences_mut().pipeline_filters = filter_prefs;
+
+        // Save to disk
+        self.preferences.save()
+    }
+
     /// Show an error modal from an anyhow::Error
     ///
     /// # Arguments
@@ -882,10 +983,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_app_creation() {
+    #[tokio::test]
+    async fn test_app_creation() {
         let config = create_test_config();
-        let app = App::new(config).unwrap();
+        let app = App::new(config).await.unwrap();
 
         assert!(matches!(app.current_screen, Screen::Pipelines));
         assert!(!app.should_quit);
@@ -894,10 +995,10 @@ mod tests {
         assert!(app.error_modal.is_none());
     }
 
-    #[test]
-    fn test_navigation_to_pipeline_detail() {
+    #[tokio::test]
+    async fn test_navigation_to_pipeline_detail() {
         let config = create_test_config();
-        let mut app = App::new(config).unwrap();
+        let mut app = App::new(config).await.unwrap();
 
         let pipeline = create_test_pipeline();
 
@@ -914,10 +1015,10 @@ mod tests {
         assert!(app.log_modal.is_none());
     }
 
-    #[test]
-    fn test_log_modal_operations() {
+    #[tokio::test]
+    async fn test_log_modal_operations() {
         let config = create_test_config();
-        let mut app = App::new(config).unwrap();
+        let mut app = App::new(config).await.unwrap();
 
         let job = create_test_job();
 
@@ -931,10 +1032,10 @@ mod tests {
         assert!(app.log_modal.is_none());
     }
 
-    #[test]
-    fn test_navigation_closes_modal() {
+    #[tokio::test]
+    async fn test_navigation_closes_modal() {
         let config = create_test_config();
-        let mut app = App::new(config).unwrap();
+        let mut app = App::new(config).await.unwrap();
 
         let pipeline = create_test_pipeline();
         let job = create_test_job();
@@ -949,10 +1050,10 @@ mod tests {
         assert!(app.log_modal.is_none());
     }
 
-    #[test]
-    fn test_two_screen_architecture() {
+    #[tokio::test]
+    async fn test_two_screen_architecture() {
         let config = create_test_config();
-        let mut app = App::new(config).unwrap();
+        let mut app = App::new(config).await.unwrap();
 
         let pipeline = create_test_pipeline();
 
@@ -971,10 +1072,10 @@ mod tests {
         assert!(matches!(app.current_screen, Screen::Pipelines));
     }
 
-    #[test]
-    fn test_error_modal_operations() {
+    #[tokio::test]
+    async fn test_error_modal_operations() {
         let config = create_test_config();
-        let mut app = App::new(config).unwrap();
+        let mut app = App::new(config).await.unwrap();
 
         // Show simple error
         app.show_error("Test Error", "Something went wrong");
@@ -985,10 +1086,10 @@ mod tests {
         assert!(app.error_modal.is_none());
     }
 
-    #[test]
-    fn test_error_modal_with_details() {
+    #[tokio::test]
+    async fn test_error_modal_with_details() {
         let config = create_test_config();
-        let mut app = App::new(config).unwrap();
+        let mut app = App::new(config).await.unwrap();
 
         // Show error with details
         app.show_error_with_details("API Error", "Request failed", "Details here");

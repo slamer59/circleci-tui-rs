@@ -17,7 +17,9 @@ mod api;
 mod app;
 mod config;
 mod events;
+mod git;
 mod models;
+mod preferences;
 mod theme;
 mod ui;
 
@@ -120,8 +122,8 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app
-    let mut app = match App::new(config) {
+    // Create app (now async)
+    let mut app = match App::new(config).await {
         Ok(app) => app,
         Err(err) => {
             // Restore terminal before showing error
@@ -155,6 +157,11 @@ async fn main() -> Result<()> {
 
     // Run app with async event loop
     let result = run_app(&mut app, &mut terminal).await;
+
+    // Save preferences before exit
+    if let Err(e) = app.save_preferences() {
+        eprintln!("Warning: Failed to save preferences: {}", e);
+    }
 
     // Restore terminal
     disable_raw_mode()?;

@@ -318,6 +318,76 @@ impl FacetedSearchBar {
         self.facets.iter().filter(|f| f.is_filtered()).count()
     }
 
+    /// Get the current selection index for a facet
+    ///
+    /// # Arguments
+    ///
+    /// * `facet_index` - The index of the facet to query
+    ///
+    /// # Returns
+    ///
+    /// The selected index for the facet, or 0 if index is out of bounds
+    pub fn get_facet_selection(&self, facet_index: usize) -> usize {
+        self.facets.get(facet_index)
+            .map(|f| f.selected_index)
+            .unwrap_or(0)
+    }
+
+    /// Set the selection index for a facet
+    ///
+    /// # Arguments
+    ///
+    /// * `facet_index` - The index of the facet to update
+    /// * `value` - The new selection index
+    pub fn set_facet_selection(&mut self, facet_index: usize, value: usize) {
+        if let Some(facet) = self.facets.get_mut(facet_index) {
+            if value < facet.options.len() {
+                facet.selected_index = value;
+                facet.update_name();
+            }
+        }
+    }
+
+    /// Set the selection for a facet by option value (string match)
+    ///
+    /// # Arguments
+    ///
+    /// * `facet_index` - The index of the facet to update
+    /// * `value` - The option value to select
+    ///
+    /// # Returns
+    ///
+    /// `true` if the value was found and set, `false` otherwise
+    pub fn set_facet_selection_by_value(&mut self, facet_index: usize, value: &str) -> bool {
+        if let Some(facet) = self.facets.get_mut(facet_index) {
+            if let Some(idx) = facet.options.iter().position(|opt| opt == value) {
+                facet.selected_index = idx;
+                facet.update_name();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Add an option to a facet if it doesn't already exist, and select it
+    ///
+    /// This is useful for branches that don't exist in the current pipeline list yet
+    pub fn add_and_select_option(&mut self, facet_index: usize, value: String) {
+        if let Some(facet) = self.facets.get_mut(facet_index) {
+            // Check if option already exists
+            if let Some(existing_index) = facet.options.iter().position(|o| o == &value) {
+                // Already exists, just select it
+                facet.selected_index = existing_index;
+            } else {
+                // Add new option after "All" (position 1)
+                facet.options.insert(1, value);
+                // Select the newly added option
+                facet.selected_index = 1;
+            }
+            facet.update_name();
+        }
+    }
+
     /// Check if the filter bar is currently in focus (dropdown open).
     ///
     /// # Returns

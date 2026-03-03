@@ -4,7 +4,7 @@
 /// Users navigate from here to the workflows list screen by pressing Enter.
 use crate::api::models::{mock_data, Pipeline};
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER, BORDER_FOCUSED, FG_BRIGHT, FG_DIM,
+    get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER_FOCUSED, FG_BRIGHT, FG_DIM,
     FG_PRIMARY,
 };
 use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
@@ -44,9 +44,43 @@ pub struct PipelineScreen {
     pub spinner: Spinner,
     /// Refreshing indicator
     pub refreshing: bool,
+    /// Authenticated user login (for "Mine" filter)
+    pub authenticated_user: Option<String>,
+    /// Authenticated user full name (for "Mine" filter)
+    pub authenticated_user_name: Option<String>,
 }
 
 impl PipelineScreen {
+    /// Create a new pipeline screen with saved preferences
+    pub fn with_preferences(
+        prefs: &crate::preferences::PipelineFilterPrefs,
+        authenticated_user: Option<String>,
+        authenticated_user_name: Option<String>,
+    ) -> Self {
+        let mut screen = Self::new();
+        screen.authenticated_user = authenticated_user;
+        screen.authenticated_user_name = authenticated_user_name;
+
+        // Apply saved filter selections
+        screen.faceted_search.set_facet_selection(0, prefs.owner_index);
+        screen.faceted_search.set_facet_selection(2, prefs.date_index);
+        screen.faceted_search.set_facet_selection(3, prefs.status_index);
+
+        // Apply saved branch (add to options if doesn't exist)
+        if let Some(ref branch) = prefs.branch {
+            // Add branch to options and select it (creates if doesn't exist)
+            screen.faceted_search.add_and_select_option(1, branch.clone());
+        }
+
+        // Apply saved search text
+        screen.search_input.set_value(prefs.search_text.clone());
+
+        // Apply filters
+        screen.apply_filters();
+
+        screen
+    }
+
     /// Create a new pipeline screen with mock data
     pub fn new() -> Self {
         let pipelines = mock_data::mock_pipelines();
@@ -119,6 +153,8 @@ impl PipelineScreen {
             search_focused: false,
             spinner: Spinner::new("Loading pipelines..."),
             refreshing: false,
+            authenticated_user: None,
+            authenticated_user_name: None,
         }
     }
 
@@ -133,25 +169,53 @@ impl PipelineScreen {
     }
 
     /// Update the branch filter facet with current unique branches
+    ///
+    /// NOTE: When "Mine" filter is active, only shows branches from current (filtered) pipelines
     fn update_branch_filter(&mut self) {
         let branches = self.get_unique_branches();
         let mut branch_options = vec!["All".to_string()];
         branch_options.extend(branches);
 
+        // Save current selection before updating options
+        let current_selection = self.faceted_search.get_filter_value(1).map(|s| s.to_string());
+
         // Update facet 1 (branch filter) with new options
         self.faceted_search.update_facet_options(1, branch_options);
+
+        // Restore selection if it still exists in new options
+        if let Some(selected_branch) = current_selection {
+            self.faceted_search.set_facet_selection_by_value(1, &selected_branch);
+        }
     }
 
-    /// Apply filters to the pipeline list
+    /// Get current filter preferences for saving
+    pub fn get_filter_preferences(&self) -> crate::preferences::PipelineFilterPrefs {
+        use crate::preferences::PipelineFilterPrefs;
+
+        let branch = self.faceted_search.get_filter_value(1);
+        let branch_opt = if branch == Some("All") {
+            None
+        } else {
+            branch.map(|s| s.to_string())
+        };
+
+        PipelineFilterPrefs {
+            owner_index: self.faceted_search.get_facet_selection(0),
+            branch: branch_opt,
+            date_index: self.faceted_search.get_facet_selection(2),
+            status_index: self.faceted_search.get_facet_selection(3),
+            search_text: self.search_input.value().to_string(),
+        }
+    }
+
+    /// Apply filters to the pipeline list (client-side only)
+    ///
+    /// NOTE: Owner ("Mine") and Branch filters are applied server-side by the API.
+    /// This method only filters by text search, date range, and status.
     pub fn apply_filters(&mut self) {
         use chrono::Utc;
 
         // Get filter values from faceted search bar
-        let owner_filter = self
-            .faceted_search
-            .get_filter_value(0)
-            .unwrap_or("All pipelines");
-        let branch_filter = self.faceted_search.get_filter_value(1).unwrap_or("All");
         let date_filter = self
             .faceted_search
             .get_filter_value(2)
@@ -176,24 +240,7 @@ impl PipelineScreen {
                         || p.vcs.commit_author_name.to_lowercase().contains(&search_text)
                 };
 
-                // Owner filter (All / Mine)
-                let owner_match = match owner_filter {
-                    "All pipelines" => true,
-                    "Mine" => {
-                        // Mock: filter by current user (placeholder logic)
-                        // In a real app, this would check against the authenticated user
-                        p.vcs.commit_author_name.contains("Alice")
-                            || p.vcs.commit_author_name.contains("Bob")
-                    }
-                    _ => true,
-                };
-
-                // Branch filter - match exact branch
-                let branch_match = if branch_filter == "All" {
-                    true
-                } else {
-                    &p.vcs.branch == branch_filter
-                };
+                // NOTE: Owner and Branch filters are applied server-side by API
 
                 // Date filter - check pipeline created_at against cutoff
                 let date_match = match date_filter {
@@ -221,10 +268,10 @@ impl PipelineScreen {
                 let status_match = if status_filter == "All" {
                     true
                 } else {
-                    &p.state == status_filter
+                    p.state == status_filter
                 };
 
-                text_match && owner_match && branch_match && date_match && status_match
+                text_match && date_match && status_match
             })
             .cloned()
             .collect();

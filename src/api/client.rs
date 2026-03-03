@@ -36,6 +36,12 @@ fn map_status(status: &str) -> String {
 // API Response structures for deserialization
 
 #[derive(Debug, Deserialize)]
+pub struct MeResponse {
+    pub login: String,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct PipelineResponse {
     items: Vec<PipelineItem>,
     next_page_token: Option<String>,
@@ -114,6 +120,32 @@ struct JobItem {
 }
 
 impl CircleCIClient {
+    /// Get current user information
+    ///
+    /// # Returns
+    /// User information including login and optional name
+    pub async fn get_me(&self) -> Result<MeResponse, ApiError> {
+        let url = format!("{}/me", self.base_url);
+
+        // Make API request
+        let response = self.client.get(&url).send().await?;
+
+        // Check for errors
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ApiError::Http(status, body));
+        }
+
+        // Parse response
+        let me_response: MeResponse = response
+            .json()
+            .await
+            .map_err(|e| ApiError::Parse(format!("Failed to parse user info: {}", e)))?;
+
+        Ok(me_response)
+    }
+
     /// Create a new CircleCI API client
     ///
     /// # Arguments
@@ -188,17 +220,53 @@ impl CircleCIClient {
     /// # Returns
     /// List of pipelines, most recent first
     pub async fn get_pipelines(&self, limit: usize) -> Result<Vec<Pipeline>, ApiError> {
+        self.get_pipelines_filtered(limit, None, false).await
+    }
+
+    /// Get pipelines for the project with optional filters (server-side filtering)
+    ///
+    /// # Arguments
+    /// * `limit` - Maximum number of pipelines to fetch
+    /// * `branch` - Optional branch name to filter by
+    /// * `mine` - If true, only return pipelines triggered by the authenticated user
+    ///
+    /// # Returns
+    /// A vector of pipelines matching the filters
+    pub async fn get_pipelines_filtered(
+        &self,
+        limit: usize,
+        branch: Option<&str>,
+        mine: bool,
+    ) -> Result<Vec<Pipeline>, ApiError> {
         let mut all_pipelines = Vec::new();
         let mut next_page_token: Option<String> = None;
 
         // Keep fetching pages until we have enough pipelines
         while all_pipelines.len() < limit {
-            let mut url = format!("{}/project/{}/pipeline", self.base_url, self.project_slug);
+            let base_url = format!("{}/project/{}/pipeline", self.base_url, self.project_slug);
+            let mut query_params = Vec::new();
+
+            // Add branch filter
+            if let Some(branch_name) = branch {
+                query_params.push(format!("branch={}", branch_name));
+            }
+
+            // Add mine filter
+            if mine {
+                query_params.push("mine=true".to_string());
+            }
 
             // Add page token if we have one
             if let Some(token) = &next_page_token {
-                url = format!("{}?page-token={}", url, token);
+                query_params.push(format!("page-token={}", token));
             }
+
+            // Build full URL with query params
+            let url = if !query_params.is_empty() {
+                format!("{}?{}", base_url, query_params.join("&"))
+            } else {
+                base_url
+            };
 
             // Make API request
             let response = self.client.get(&url).send().await?;
