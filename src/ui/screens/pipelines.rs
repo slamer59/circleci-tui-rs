@@ -1024,54 +1024,31 @@ fn create_pipeline_row<'a>(
         ))
     };
 
+    // Build metadata line with consistent separators: ⎇ branch  ∙  sha  ∙  @author  ∙  🏷 scheduled  ∙  #number
+    let mut metadata_parts = vec![
+        format!("⎇  {}", &pipeline.vcs.branch),
+        sha.to_string(),
+        format!("@{}", &pipeline.vcs.commit_author_name),
+    ];
+
+    if !tag_str.is_empty() {
+        metadata_parts.push(tag_str.trim().to_string());
+    }
+
+    metadata_parts.push(format!("#{}", pipeline.number));
+
+    let metadata_text = metadata_parts.join("  ∙  ");
+
     let workflow_line2 = if selected {
-        Line::from(vec![
-            Span::styled("⎇ ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                format!("{}  ", &pipeline.vcs.branch),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("∙ {}  ", sha),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("@{}  ", &pipeline.vcs.commit_author_name),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("{}", tag_str),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("  #{}", pipeline.number),
-                Style::default().fg(FG_DIM),
-            ),
-        ])
+        Line::from(Span::styled(
+            metadata_text,
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ))
     } else {
-        Line::from(vec![
-            Span::styled("⎇ ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                format!("{}  ", &pipeline.vcs.branch),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("∙ {}  ", sha),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("@{}  ", &pipeline.vcs.commit_author_name),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("{}", tag_str),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("  #{}", pipeline.number),
-                Style::default().fg(FG_DIM),
-            ),
-        ])
+        Line::from(Span::styled(
+            metadata_text,
+            Style::default().fg(FG_DIM),
+        ))
     };
     let workflow_cell = Cell::from(Text::from(vec![workflow_line1, workflow_line2]));
 
