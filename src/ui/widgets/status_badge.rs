@@ -1,7 +1,7 @@
 /// Status badge helper functions
 ///
 /// This module provides convenience re-exports of status badge functions from the theme module.
-pub use crate::theme::{get_status_color, get_status_icon};
+pub use crate::theme::get_status_icon;
 
 /// Format a status badge with icon and text
 pub fn format_status_badge(status: &str) -> String {

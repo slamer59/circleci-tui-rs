@@ -208,6 +208,40 @@ impl PipelineScreen {
         }
     }
 
+    /// Calculate status summary for pipelines (like "✓ 10 ● 2 ✗ 3")
+    fn calculate_status_summary(&self) -> String {
+        let mut success = 0;
+        let mut failed = 0;
+        let mut running = 0;
+
+        for pipeline in &self.filtered_pipelines {
+            match pipeline.state.as_str() {
+                "success" => success += 1,
+                "failed" | "error" => failed += 1,
+                "running" => running += 1,
+                _ => {}
+            }
+        }
+
+        let mut parts = Vec::new();
+
+        if success > 0 {
+            parts.push(format!("✓ {}", success));
+        }
+        if running > 0 {
+            parts.push(format!("● {}", running));
+        }
+        if failed > 0 {
+            parts.push(format!("✗ {}", failed));
+        }
+
+        if parts.is_empty() {
+            String::new()
+        } else {
+            parts.join(" ")
+        }
+    }
+
     /// Apply filters to the pipeline list (client-side only)
     ///
     /// NOTE: Owner ("Mine") and Branch filters are applied server-side by the API.
@@ -411,6 +445,14 @@ impl PipelineScreen {
 
     /// Render pipeline list with multi-line items (glim-style dense layout)
     fn render_pipeline_list(&mut self, f: &mut Frame, area: Rect) {
+        // Calculate status summary for title
+        let status_summary = self.calculate_status_summary();
+        let title = if status_summary.is_empty() {
+            " PIPELINES ".to_string()
+        } else {
+            format!(" PIPELINES {} ", status_summary)
+        };
+
         // Determine border style - bold when list is focused (not in search/filter mode)
         let border_style = if !self.search_focused && !self.filter_active {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
@@ -419,6 +461,7 @@ impl PipelineScreen {
         };
 
         let block = Block::default()
+            .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(border_style)
@@ -910,10 +953,15 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
     };
 
     // Line 2: ⎇ fix/bug  ∙ a1b2c3d  @slamer59  🏷 scheduled
+    // Use consistent 5-space indent like Jobs table
     let line2 = if selected {
         Line::from(vec![
             Span::styled(
-                format!("          ⎇ {}  ", pipeline.vcs.branch),
+                "     ⎇ ",
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("{}  ", pipeline.vcs.branch),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -921,7 +969,7 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
-                format!("@{}", pipeline.vcs.commit_author_name),
+                format!("@{}  ", pipeline.vcs.commit_author_name),
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
@@ -932,7 +980,11 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
     } else {
         Line::from(vec![
             Span::styled(
-                format!("          ⎇ {}  ", pipeline.vcs.branch),
+                "     ⎇ ",
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("{}  ", pipeline.vcs.branch),
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
@@ -940,7 +992,7 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
-                format!("@{}", pipeline.vcs.commit_author_name),
+                format!("@{}  ", pipeline.vcs.commit_author_name),
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(

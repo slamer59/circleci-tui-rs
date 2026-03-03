@@ -6,6 +6,7 @@ pub mod faceted_search;
 pub mod help_modal;
 pub mod job_item;
 pub mod log_modal;
+pub mod log_viewer;
 pub mod pipeline_item;
 pub mod spinner;
 pub mod ssh_modal;

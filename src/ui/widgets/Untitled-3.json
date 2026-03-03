@@ -1,0 +1,28 @@
+{
+  "cups": "ES0222120000275608CH",
+  "accountNumber": "A-EAF0B1D7",
+  "opportunity_number": "OP-DE81BC06",
+  "estimated_annual_flow": "1",
+  "opportunity_rich_address": {
+    "name": "",
+    "country": "ES",
+    "asString": "AC Cortes, 1, PS. 1 PTA. 1, 03205, Elx, Álava/Araba, España",
+    "locality": "Elx",
+    "postalCode": "03205",
+    "sortingCode": "",
+    "organization": "",
+    "streetAddress": "AC Cortes, 1\nPS. 1 PTA. 1",
+    "dependentLocality": "",
+    "administrativeArea": "01",
+    "deliveryPointIdentifier": "",
+    "structuredStreetAddress": {
+      "door": "1",
+      "floor": "1",
+      "street_name": "Cortes",
+      "street_type": "AC",
+      "street_number": "1"
+    }
+  },
+  "current_opportunity_stage": "won_opportunity",
+  "dismissSocialBonusRejections": false
+}
