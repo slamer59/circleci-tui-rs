@@ -2,11 +2,12 @@
 ///
 /// This is the first screen in the hierarchy: Pipeline → Workflow → Job
 /// Users navigate from here to the workflows list screen by pressing Enter.
-use crate::api::models::{mock_data, Pipeline};
+use crate::api::models::{mock_data, Pipeline, Workflow};
 use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER_FOCUSED, FG_BRIGHT, FG_DIM,
     FG_PRIMARY,
 };
+use crate::ui::utils::{truncate_string, truncate_string_left};
 use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
 use crate::ui::widgets::spinner::Spinner;
 use crate::ui::widgets::text_input::TextInput;
@@ -14,11 +15,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    text::{Line, Span, Text},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Pipeline screen with dense list and filters
 pub struct PipelineScreen {
@@ -26,8 +27,8 @@ pub struct PipelineScreen {
     pub pipelines: Vec<Pipeline>,
     /// Filtered pipelines (after applying filters)
     pub filtered_pipelines: Vec<Pipeline>,
-    /// List selection state
-    pub list_state: ListState,
+    /// Table selection state
+    pub table_state: TableState,
     /// Currently selected index (in filtered list)
     pub selected_index: Option<usize>,
     /// Loading state
@@ -48,6 +49,10 @@ pub struct PipelineScreen {
     pub authenticated_user: Option<String>,
     /// Authenticated user full name (for "Mine" filter)
     pub authenticated_user_name: Option<String>,
+    /// Cached workflows by pipeline ID
+    pub pipeline_workflows: HashMap<String, Vec<Workflow>>,
+    /// Loading state for workflows
+    pub loading_workflows: bool,
 }
 
 impl PipelineScreen {
@@ -85,8 +90,8 @@ impl PipelineScreen {
     pub fn new() -> Self {
         let pipelines = mock_data::mock_pipelines();
         let filtered_pipelines = pipelines.clone();
-        let mut list_state = ListState::default();
-        list_state.select(Some(0));
+        let mut table_state = TableState::default();
+        table_state.select(Some(0)); // Select first row (no header offset needed)
 
         // Extract unique branches from pipelines
         let mut branches: Vec<String> = pipelines
@@ -144,7 +149,7 @@ impl PipelineScreen {
         Self {
             pipelines,
             filtered_pipelines,
-            list_state,
+            table_state,
             selected_index: Some(0),
             loading: false,
             search_input,
@@ -155,6 +160,8 @@ impl PipelineScreen {
             refreshing: false,
             authenticated_user: None,
             authenticated_user_name: None,
+            pipeline_workflows: HashMap::new(),
+            loading_workflows: false,
         }
     }
 
@@ -166,6 +173,12 @@ impl PipelineScreen {
         self.update_branch_filter();
 
         self.apply_filters();
+    }
+
+    /// Set workflows for pipelines (called by app.rs)
+    pub fn set_pipeline_workflows(&mut self, workflows: HashMap<String, Vec<Workflow>>) {
+        self.pipeline_workflows = workflows;
+        self.loading_workflows = false;
     }
 
     /// Update the branch filter facet with current unique branches
@@ -313,14 +326,14 @@ impl PipelineScreen {
         // Reset selection if needed
         if self.filtered_pipelines.is_empty() {
             self.selected_index = None;
-            self.list_state.select(None);
+            self.table_state.select(None);
         } else if self.selected_index.is_some() {
             let idx = self
                 .selected_index
                 .unwrap()
                 .min(self.filtered_pipelines.len() - 1);
             self.selected_index = Some(idx);
-            self.list_state.select(Some(idx));
+            self.table_state.select(Some(idx));
         }
     }
 
@@ -566,40 +579,106 @@ impl PipelineScreen {
                 .border_style(Style::default().fg(BORDER_FOCUSED))
                 .style(Style::default().bg(BG_PANEL));
 
+            // Define column widths: fixed sizes for STATUS/STAGES/DURATION, WORKFLOW fills remaining space
+            let widths = [
+                Constraint::Length(12),   // STATUS: icon + time (fixed)
+                Constraint::Fill(1),      // WORKFLOW: expand to fill available space
+                Constraint::Length(8),    // STAGES: stage icons (compact)
+                Constraint::Length(10),   // DURATION: time display (compact)
+            ];
+
+            // Create header row
+            let header = Row::new(vec![
+                Cell::from(Span::styled(
+                    "STATUS",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "WORKFLOW",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "STAGES",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "DURATION",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+            ])
+            .height(1);
+
+            // Map filtered pipelines to rows
             let selected_idx = self.selected_index;
-            let items: Vec<ListItem> = self
+            let rows: Vec<Row> = self
                 .filtered_pipelines
                 .iter()
                 .enumerate()
                 .map(|(idx, pipeline)| {
                     let is_selected = selected_idx == Some(idx);
-                    render_pipeline_multiline(pipeline, is_selected)
+                    let workflows = self.pipeline_workflows.get(&pipeline.id);
+                    create_pipeline_row(pipeline, workflows, is_selected)
                 })
                 .collect();
 
-            let list = List::new(items)
+            // Build and render table
+            let table = Table::new(rows, widths)
+                .header(header)
                 .block(block)
                 .highlight_style(Style::default());
 
-            f.render_stateful_widget(list, area, &mut self.list_state);
+            f.render_stateful_widget(table, area, &mut self.table_state);
         } else {
             // Normal rendering
+            // Define column widths: fixed sizes for STATUS/STAGES/DURATION, WORKFLOW fills remaining space
+            let widths = [
+                Constraint::Length(12),   // STATUS: icon + time (fixed)
+                Constraint::Fill(1),      // WORKFLOW: expand to fill available space
+                Constraint::Length(8),    // STAGES: stage icons (compact)
+                Constraint::Length(10),   // DURATION: time display (compact)
+            ];
+
+            // Create header row
+            let header = Row::new(vec![
+                Cell::from(Span::styled(
+                    "STATUS",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "WORKFLOW",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "STAGES",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "DURATION",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+            ])
+            .height(1);
+
+            // Map filtered pipelines to rows
             let selected_idx = self.selected_index;
-            let items: Vec<ListItem> = self
+            let rows: Vec<Row> = self
                 .filtered_pipelines
                 .iter()
                 .enumerate()
                 .map(|(idx, pipeline)| {
                     let is_selected = selected_idx == Some(idx);
-                    render_pipeline_multiline(pipeline, is_selected)
+                    let workflows = self.pipeline_workflows.get(&pipeline.id);
+                    create_pipeline_row(pipeline, workflows, is_selected)
                 })
                 .collect();
 
-            let list = List::new(items)
+            // Build and render table
+            let table = Table::new(rows, widths)
+                .header(header)
                 .block(block)
                 .highlight_style(Style::default());
 
-            f.render_stateful_widget(list, area, &mut self.list_state);
+            f.render_stateful_widget(table, area, &mut self.table_state);
         }
     }
 
@@ -825,7 +904,7 @@ impl PipelineScreen {
             None => 0,
         };
         self.selected_index = Some(i);
-        self.list_state.select(Some(i));
+        self.table_state.select(Some(i));
     }
 
     /// Move selection up
@@ -845,7 +924,7 @@ impl PipelineScreen {
             None => 0,
         };
         self.selected_index = Some(i);
-        self.list_state.select(Some(i));
+        self.table_state.select(Some(i));
     }
 
     /// Get the currently selected pipeline (from filtered list)
@@ -861,10 +940,13 @@ impl Default for PipelineScreen {
     }
 }
 
-/// Render a pipeline as multi-line item (2 lines: new compact layout)
-/// Line 1: [status icon] [time] [#ID] [commit message] [stages] ([duration])
-/// Line 2: [branch] [∙ SHA] [@author] [🏷 tags]
-fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_> {
+/// Create a pipeline row for Table widget (2 lines per row)
+/// Returns a Row with 4 cells: STATUS | WORKFLOW | STAGES | DURATION
+fn create_pipeline_row<'a>(
+    pipeline: &'a Pipeline,
+    workflows: Option<&'a Vec<Workflow>>,
+    selected: bool,
+) -> Row<'a> {
     let icon = get_status_icon(&pipeline.state);
     let status_col = get_status_color(&pipeline.state);
 
@@ -874,14 +956,24 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
     // Calculate duration (from created to updated)
     let duration = format_duration(pipeline.created_at, pipeline.updated_at);
 
-    // Mock stage icons for now (4 stages all passed)
-    // TODO: Replace with real stage data
-    let stage_icons = match pipeline.state.as_str() {
-        "success" => "✓✓✓✓",
-        "failed" => "✓✓✗✗",
-        "running" => "✓✓○○",
-        "pending" => "◐◐◐◐",
-        _ => "●●●●",
+    // Generate stage icons from workflow statuses
+    let stage_icons = if let Some(wfs) = workflows {
+        let icons: String = wfs
+            .iter()
+            .take(5) // First 5 workflows only
+            .map(|w| get_status_icon(&w.status))
+            .collect();
+
+        // Add overflow indicator if more than 5 workflows
+        if wfs.len() > 5 {
+            format!("{}…", icons)
+        } else if icons.is_empty() {
+            "----".to_string() // No workflows
+        } else {
+            icons
+        }
+    } else {
+        "····".to_string() // Loading state
     };
 
     // Extract first 7 chars of commit SHA
@@ -898,70 +990,45 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
         ""
     };
 
-    // Line 1: ✓ 2h ago  #1234  Add TTES template override  ✓✓✓✓ (2m 34s)
-    let line1 = if selected {
+    // Cell 1: STATUS (icon + time on line 1, empty on line 2)
+    let status_line1 = if selected {
         Line::from(vec![
             Span::styled(
                 format!("{} ", icon),
                 Style::default().fg(status_col).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:<8}", time_str),
+                time_str,
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("  #{}  ", pipeline.number),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{}  ", pipeline.vcs.commit_subject),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{} ", stage_icons),
-                Style::default().fg(status_col).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("({})", duration),
-                Style::default().fg(FG_DIM),
             ),
         ])
     } else {
         Line::from(vec![
             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
-            Span::styled(
-                format!("{:<8}", time_str),
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("  #{}  ", pipeline.number),
-                Style::default().fg(FG_PRIMARY),
-            ),
-            Span::styled(
-                format!("{}  ", pipeline.vcs.commit_subject),
-                Style::default().fg(FG_PRIMARY),
-            ),
-            Span::styled(
-                format!("{} ", stage_icons),
-                Style::default().fg(status_col),
-            ),
-            Span::styled(
-                format!("({})", duration),
-                Style::default().fg(FG_DIM),
-            ),
+            Span::styled(time_str, Style::default().fg(FG_DIM)),
         ])
     };
+    let status_line2 = Line::from("          "); // 10 spaces to match column width
+    let status_cell = Cell::from(Text::from(vec![status_line1, status_line2]));
 
-    // Line 2: ⎇ fix/bug  ∙ a1b2c3d  @slamer59  🏷 scheduled
-    // Use consistent 5-space indent like Jobs table
-    let line2 = if selected {
+    // Cell 2: WORKFLOW (commit subject on line 1, metadata on line 2)
+    let workflow_line1 = if selected {
+        Line::from(Span::styled(
+            &pipeline.vcs.commit_subject,
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        Line::from(Span::styled(
+            &pipeline.vcs.commit_subject,
+            Style::default().fg(FG_PRIMARY),
+        ))
+    };
+
+    let workflow_line2 = if selected {
         Line::from(vec![
+            Span::styled("⎇ ", Style::default().fg(FG_DIM)),
             Span::styled(
-                "     ⎇ ",
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("{}  ", pipeline.vcs.branch),
+                format!("{}  ", &pipeline.vcs.branch),
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -969,22 +1036,23 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
-                format!("@{}  ", pipeline.vcs.commit_author_name),
+                format!("@{}  ", &pipeline.vcs.commit_author_name),
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
-                tag_str,
+                format!("{}", tag_str),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("  #{}", pipeline.number),
                 Style::default().fg(FG_DIM),
             ),
         ])
     } else {
         Line::from(vec![
+            Span::styled("⎇ ", Style::default().fg(FG_DIM)),
             Span::styled(
-                "     ⎇ ",
-                Style::default().fg(FG_DIM),
-            ),
-            Span::styled(
-                format!("{}  ", pipeline.vcs.branch),
+                format!("{}  ", &pipeline.vcs.branch),
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
@@ -992,18 +1060,39 @@ fn render_pipeline_multiline(pipeline: &Pipeline, selected: bool) -> ListItem<'_
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
-                format!("@{}  ", pipeline.vcs.commit_author_name),
+                format!("@{}  ", &pipeline.vcs.commit_author_name),
                 Style::default().fg(FG_DIM),
             ),
             Span::styled(
-                tag_str,
+                format!("{}", tag_str),
+                Style::default().fg(FG_DIM),
+            ),
+            Span::styled(
+                format!("  #{}", pipeline.number),
                 Style::default().fg(FG_DIM),
             ),
         ])
     };
+    let workflow_cell = Cell::from(Text::from(vec![workflow_line1, workflow_line2]));
 
-    // Combine all lines into a ListItem
-    ListItem::new(vec![line1, line2])
+    // Cell 3: STAGES (stage icons on line 1, empty on line 2)
+    let stages_line1 = if selected {
+        Line::from(Span::styled(
+            stage_icons,
+            Style::default().fg(status_col).add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        Line::from(Span::styled(stage_icons, Style::default().fg(status_col)))
+    };
+    let stages_line2 = Line::from("       "); // 7 spaces to match column width
+    let stages_cell = Cell::from(Text::from(vec![stages_line1, stages_line2]));
+
+    // Cell 4: DURATION (duration on line 1, empty on line 2)
+    let duration_line1 = Line::from(Span::styled(duration, Style::default().fg(FG_DIM)));
+    let duration_line2 = Line::from("        "); // 8 spaces to match column width
+    let duration_cell = Cell::from(Text::from(vec![duration_line1, duration_line2]));
+
+    Row::new(vec![status_cell, workflow_cell, stages_cell, duration_cell]).height(2)
 }
 
 /// Format timestamp with date context for clarity
@@ -1119,21 +1208,4 @@ mod tests {
         assert!(pipeline.is_some());
     }
 
-    #[test]
-    fn test_truncate_string() {
-        assert_eq!(truncate_string("short", 10), "short");
-        assert_eq!(
-            truncate_string("this is a very long string", 10),
-            "this is..."
-        );
-    }
-}
-
-/// Truncate a string to a maximum length and add "..." if truncated
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
 }

@@ -568,10 +568,57 @@ impl App {
             .await?;
 
         // Update pipeline screen with new data
-        self.pipeline_screen.set_pipelines(pipelines);
+        self.pipeline_screen.set_pipelines(pipelines.clone());
 
         self.is_loading = false;
+
+        // Pre-fetch workflows for all pipelines in the background
+        self.prefetch_workflows(pipelines).await;
+
         Ok(())
+    }
+
+    /// Pre-fetch workflows for all pipelines
+    ///
+    /// This method fetches workflows for all pipelines in parallel and stores them
+    /// in the pipeline_workflows HashMap. Errors are silently ignored to prevent
+    /// blocking the UI.
+    async fn prefetch_workflows(&mut self, pipelines: Vec<Pipeline>) {
+        use std::collections::HashMap;
+
+        // Set loading state
+        self.pipeline_screen.loading_workflows = true;
+
+        // Extract pipeline IDs
+        let pipeline_ids: Vec<String> = pipelines.iter().map(|p| p.id.clone()).collect();
+
+        // Fetch workflows in parallel
+        let api_client = Arc::clone(&self.api_client);
+        let mut tasks = Vec::new();
+
+        for pipeline_id in pipeline_ids {
+            let client = Arc::clone(&api_client);
+            let task = tokio::spawn(async move {
+                let workflows = client.get_workflows(&pipeline_id).await;
+                (pipeline_id, workflows)
+            });
+            tasks.push(task);
+        }
+
+        // Collect results
+        let mut pipeline_workflows = HashMap::new();
+        for task in tasks {
+            if let Ok((pipeline_id, result)) = task.await {
+                if let Ok(workflows) = result {
+                    pipeline_workflows.insert(pipeline_id, workflows);
+                }
+                // Silently ignore errors - workflows will show loading state
+            }
+        }
+
+        // Update pipeline screen with workflows
+        self.pipeline_screen
+            .set_pipeline_workflows(pipeline_workflows);
     }
 
     /// Load workflows for a pipeline

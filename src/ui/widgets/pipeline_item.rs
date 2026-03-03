@@ -1,6 +1,7 @@
 /// Pipeline item rendering
 use crate::models::Pipeline;
 use crate::theme::{get_status_color, get_status_icon, ACCENT, FG_DIM, FG_PRIMARY};
+use crate::ui::utils::truncate_string;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -61,27 +62,9 @@ pub fn render_pipeline_item<'a>(pipeline: &'a Pipeline, selected: bool) -> Vec<L
     vec![line]
 }
 
-/// Truncate a string to a maximum length, adding "..." if truncated
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_truncate_string() {
-        assert_eq!(truncate_string("short", 10), "short");
-        assert_eq!(
-            truncate_string("this is a very long string", 10),
-            "this is..."
-        );
-    }
 
     #[test]
     fn test_render_pipeline_item() {

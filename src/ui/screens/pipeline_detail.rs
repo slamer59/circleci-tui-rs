@@ -8,6 +8,7 @@ use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, FG_BRIGHT, FG_DIM,
     FG_PRIMARY, RUNNING,
 };
+use crate::ui::utils::truncate_string;
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
 use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
 use crate::ui::widgets::powerline::PowerlineBar;
@@ -16,8 +17,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    text::{Line, Span, Text},
+    widgets::{Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState},
     Frame,
 };
 use std::collections::HashMap;
@@ -73,8 +74,8 @@ pub struct PipelineDetailScreen {
     pub faceted_search: FacetedSearchBar,
     /// List state for workflow selection
     pub workflow_list_state: ListState,
-    /// List state for job selection
-    pub job_list_state: ListState,
+    /// Table state for job selection
+    pub job_table_state: TableState,
     /// Loading workflows
     pub loading_workflows: bool,
     /// Loading jobs
@@ -113,9 +114,9 @@ impl PipelineDetailScreen {
         let mut workflow_list_state = ListState::default();
         workflow_list_state.select(Some(0));
 
-        let mut job_list_state = ListState::default();
+        let mut job_table_state = TableState::default();
         if !jobs.is_empty() {
-            job_list_state.select(Some(0));
+            job_table_state.select(Some(0));
         }
 
         // Create faceted search bar with Status and Duration facets
@@ -159,7 +160,7 @@ impl PipelineDetailScreen {
             focus: PanelFocus::Workflows,
             faceted_search,
             workflow_list_state,
-            job_list_state,
+            job_table_state,
             loading_workflows: false,
             loading_jobs: false,
             loading_more_jobs: false,
@@ -204,10 +205,10 @@ impl PipelineDetailScreen {
         self.jobs = jobs;
         if !self.jobs.is_empty() {
             self.selected_job_index = Some(0);
-            self.job_list_state.select(Some(0));
+            self.job_table_state.select(Some(0));
         } else {
             self.selected_job_index = None;
-            self.job_list_state.select(None);
+            self.job_table_state.select(None);
         }
     }
 
@@ -224,10 +225,10 @@ impl PipelineDetailScreen {
 
         if !self.jobs.is_empty() {
             self.selected_job_index = Some(0);
-            self.job_list_state.select(Some(0));
+            self.job_table_state.select(Some(0));
         } else {
             self.selected_job_index = None;
-            self.job_list_state.select(None);
+            self.job_table_state.select(None);
         }
     }
 
@@ -246,7 +247,7 @@ impl PipelineDetailScreen {
         // Restore selection
         if let Some(idx) = current_selected {
             self.selected_job_index = Some(idx);
-            self.job_list_state.select(Some(idx));
+            self.job_table_state.select(Some(idx));
         }
     }
 
@@ -307,7 +308,7 @@ impl PipelineDetailScreen {
 
         // Reset job selection
         self.selected_job_index = None;
-        self.job_list_state.select(None);
+        self.job_table_state.select(None);
     }
 
     /// Get the filtered list of jobs
@@ -490,10 +491,10 @@ impl PipelineDetailScreen {
                     let filtered_jobs = self.get_filtered_jobs();
                     if !filtered_jobs.is_empty() {
                         self.selected_job_index = Some(0);
-                        self.job_list_state.select(Some(0));
+                        self.job_table_state.select(Some(0));
                     } else {
                         self.selected_job_index = None;
-                        self.job_list_state.select(None);
+                        self.job_table_state.select(None);
                     }
                 }
                 PipelineDetailAction::None
@@ -550,7 +551,7 @@ impl PipelineDetailScreen {
         };
 
         self.selected_job_index = Some(next);
-        self.job_list_state.select(Some(next));
+        self.job_table_state.select(Some(next));
     }
 
     /// Move job selection up
@@ -572,7 +573,7 @@ impl PipelineDetailScreen {
         };
 
         self.selected_job_index = Some(prev);
-        self.job_list_state.select(Some(prev));
+        self.job_table_state.select(Some(prev));
     }
 
     /// Render the pipeline detail screen
@@ -854,6 +855,63 @@ impl PipelineDetailScreen {
         self.faceted_search.render_filter_bar_only(f, inner);
     }
 
+    /// Create a table row for a job
+    fn create_job_row(job: &Job) -> Row<'static> {
+        let status_col = get_status_color(&job.status);
+
+        // Format time
+        let time = if let Some(started) = job.started_at {
+            format!("{}", started.format("%H:%M"))
+        } else {
+            "pending".to_string()
+        };
+
+        // Format duration
+        let duration = job.duration_formatted();
+
+        // Get status message (owned string)
+        let status_message = match job.status.as_str() {
+            "success" => "Completed successfully".to_string(),
+            "failed" => "Connection timeout".to_string(),
+            "running" => "In progress...".to_string(),
+            "blocked" => "Waiting for dependencies".to_string(),
+            "pending" => "Queued".to_string(),
+            _ => job.status.clone(),
+        };
+
+        // Clone job name to make it owned
+        let job_name = job.name.clone();
+
+        // Create cells with 2 lines each
+        let status_cell = Cell::from(Text::from(vec![
+            Line::from(Span::styled("● ", Style::default().fg(status_col))),
+            Line::from("  "),
+        ]));
+
+        let time_cell = Cell::from(Text::from(vec![
+            Line::from(Span::styled(time, Style::default().fg(FG_DIM))),
+            Line::from("      "),
+        ]));
+
+        let job_name_cell = Cell::from(Text::from(vec![
+            Line::from(Span::styled(
+                job_name,
+                Style::default().fg(FG_PRIMARY),
+            )),
+            Line::from(Span::styled(
+                format!("  {}", status_message),
+                Style::default().fg(FG_DIM),
+            )),
+        ]));
+
+        let duration_cell = Cell::from(Text::from(vec![
+            Line::from(Span::styled(duration, Style::default().fg(FG_DIM))),
+            Line::from("        "),
+        ]));
+
+        Row::new(vec![status_cell, time_cell, job_name_cell, duration_cell]).height(2)
+    }
+
     /// Render the job list
     fn render_job_list(&mut self, f: &mut Frame, area: Rect) {
         let filtered_jobs = self.get_filtered_jobs();
@@ -952,82 +1010,72 @@ impl PipelineDetailScreen {
 
             f.render_widget(empty_message, inner);
         } else {
-            // Normal rendering
-            let mut items: Vec<ListItem> = Vec::new();
+            // Normal rendering with Table widget - compact fixed columns, JOB NAME fills remaining
+            let widths = [
+                Constraint::Length(3),   // STATUS: icon (compact)
+                Constraint::Length(8),   // TIME: HH:MM format (compact)
+                Constraint::Fill(1),     // JOB NAME: expand to fill available space
+                Constraint::Length(10),  // DURATION: time display (compact)
+            ];
 
-            for job in filtered_jobs.iter() {
-                let _icon = get_status_icon(&job.status);
-                let status_col = get_status_color(&job.status);
+            // Create header row
+            let header = Row::new(vec![
+                Cell::from(""),
+                Cell::from(Span::styled(
+                    "TIME",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "JOB NAME",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(Span::styled(
+                    "DURATION",
+                    Style::default().fg(FG_DIM).add_modifier(Modifier::BOLD),
+                )),
+            ])
+            .height(1);
 
-                // Line 1: ● [time] [job_name] [duration] ●
-                let time = if let Some(started) = job.started_at {
-                    format!("{}", started.format("%H:%M"))
-                } else {
-                    "pending".to_string()
-                };
-
-                let duration = job.duration_formatted();
-
-                let line1 = Line::from(vec![
-                    Span::styled("● ", Style::default().fg(status_col)),
-                    Span::styled(format!("{}  ", time), Style::default().fg(FG_DIM)),
-                    Span::styled(
-                        format!("{:<20} ", truncate_string(&job.name, 18)),
-                        Style::default().fg(FG_PRIMARY),
-                    ),
-                    Span::styled(format!("{:<8} ", duration), Style::default().fg(FG_DIM)),
-                    Span::styled("●", Style::default().fg(status_col)),
-                ]);
-
-                // Line 2: indented status message or step info
-                let status_message = match job.status.as_str() {
-                    "success" => "Completed successfully",
-                    "failed" => "Connection timeout",
-                    "running" => "In progress...",
-                    "blocked" => "Waiting for dependencies",
-                    "pending" => "Queued",
-                    _ => &job.status,
-                };
-
-                let line2 = Line::from(vec![Span::styled(
-                    format!("     {}", status_message),
-                    Style::default().fg(FG_DIM),
-                )]);
-
-                items.push(ListItem::new(vec![line1, line2]));
-            }
+            // Map filtered jobs to rows
+            let mut rows: Vec<Row> = filtered_jobs
+                .iter()
+                .map(|job| Self::create_job_row(job))
+                .collect();
 
             // Add "Load More" button if pagination is available
             if self.can_load_more() {
                 let load_more_text = if self.loading_more_jobs {
-                    "● Loading more jobs...".to_string()
+                    "Loading more jobs...".to_string()
                 } else {
                     let count_info = self.get_pagination_info();
                     format!("[Load More Jobs] {}", count_info)
                 };
 
-                let load_more_line = Line::from(vec![
-                    Span::raw("     "),
-                    Span::styled(
-                        load_more_text,
-                        Style::default()
-                            .fg(if self.loading_more_jobs {
-                                RUNNING
-                            } else {
-                                ACCENT
-                            })
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]);
+                let load_more_row = Row::new(vec![
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(Text::from(vec![
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            load_more_text,
+                            Style::default()
+                                .fg(if self.loading_more_jobs { RUNNING } else { ACCENT })
+                                .add_modifier(Modifier::BOLD),
+                        )),
+                    ])),
+                    Cell::from(""),
+                ])
+                .height(2);
 
-                items.push(ListItem::new(vec![Line::from(""), load_more_line]));
+                rows.push(load_more_row);
             }
 
-            let list = List::new(items)
+            let table = Table::new(rows, widths)
+                .header(header)
                 .block(block)
                 .highlight_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD));
 
-            f.render_stateful_widget(list, area, &mut self.job_list_state);
+            f.render_stateful_widget(table, area, &mut self.job_table_state);
         }
     }
 
@@ -1211,14 +1259,6 @@ impl PipelineDetailScreen {
     }
 }
 
-/// Truncate a string to a maximum length, adding "..." if truncated
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1567,12 +1607,4 @@ mod tests {
         assert_eq!(filtered[0].name, "long");
     }
 
-    #[test]
-    fn test_truncate_string() {
-        assert_eq!(truncate_string("short", 10), "short");
-        assert_eq!(
-            truncate_string("this is a very long string", 10),
-            "this is..."
-        );
-    }
 }
