@@ -229,6 +229,21 @@ impl HelpModal {
                 ),
                 Span::styled("           Rerun workflow", Style::default().fg(FG_PRIMARY)),
             ]),
+            Line::from(vec![
+                Span::styled(
+                    "  y",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("           Copy job logs (opens range selector)", Style::default().fg(FG_PRIMARY)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "  s",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("           SSH into job", Style::default().fg(FG_PRIMARY)),
+
+            ]),
             Line::from(""),
             // Modals
             Line::from(Span::styled(

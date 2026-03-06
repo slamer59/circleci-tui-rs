@@ -5,6 +5,7 @@ pub mod error_modal;
 pub mod faceted_search;
 pub mod help_modal;
 pub mod job_item;
+pub mod line_range_modal;
 pub mod log_modal;
 pub mod log_viewer;
 pub mod pipeline_item;

@@ -11,6 +11,7 @@ use crate::theme::{
 use crate::ui::utils::truncate_string;
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
 use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
+use crate::ui::widgets::line_range_modal::{LineRangeAction, LineRangeModal};
 use crate::ui::widgets::powerline::PowerlineBar;
 use crate::ui::widgets::spinner::Spinner;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -96,6 +97,10 @@ pub struct PipelineDetailScreen {
     pub log_cache: HashMap<u32, Vec<String>>,
     /// Pending log fetch request (job number)
     pub pending_log_fetch: Option<u32>,
+    /// Line range modal for yank operations
+    pub line_range_modal: LineRangeModal,
+    /// Job number pending copy operation (waiting for modal confirmation)
+    pub pending_copy_job: Option<u32>,
     /// Powerline status bar
     pub powerline: PowerlineBar,
 }
@@ -171,6 +176,8 @@ impl PipelineDetailScreen {
             spinner: Spinner::new("Loading..."),
             log_cache: HashMap::new(),
             pending_log_fetch: None,
+            line_range_modal: LineRangeModal::new(),
+            pending_copy_job: None,
             powerline: PowerlineBar::new(),
         }
     }
@@ -359,6 +366,23 @@ impl PipelineDetailScreen {
 
     /// Handle keyboard input
     pub fn handle_input(&mut self, key: KeyEvent) -> PipelineDetailAction {
+        // Check if line range modal is open first
+        if self.line_range_modal.is_visible() {
+            match self.line_range_modal.handle_input(key) {
+                LineRangeAction::Confirm(range_str) => {
+                    if let Some(job_number) = self.pending_copy_job.take() {
+                        self.handle_copy_logs_range(job_number, &range_str);
+                    }
+                    return PipelineDetailAction::None;
+                }
+                LineRangeAction::Cancel => {
+                    self.pending_copy_job = None;
+                    return PipelineDetailAction::None;
+                }
+                LineRangeAction::None => return PipelineDetailAction::None,
+            }
+        }
+
         // Handle filter mode input
         if self.focus == PanelFocus::Filters {
             return self.handle_filter_input(key);
@@ -456,12 +480,23 @@ impl PipelineDetailScreen {
                 PipelineDetailAction::None
             }
             KeyCode::Char('y') => {
-                // Copy logs for selected job
+                // Show line range input modal
                 if self.focus == PanelFocus::Jobs {
                     if let Some(job) = self.get_selected_job() {
                         let job_number = job.job_number;
-                        self.handle_copy_logs(job_number);
-                        return PipelineDetailAction::CopyLogs(job_number);
+
+                        // Check if logs are cached
+                        if let Some(logs) = self.log_cache.get(&job_number) {
+                            // Show modal with total line count
+                            self.line_range_modal.show(logs.len());
+                            self.pending_copy_job = Some(job_number);
+                        } else {
+                            // Trigger log fetch first
+                            self.powerline.set_loading("Loading logs...".to_string());
+                            self.pending_log_fetch = Some(job_number);
+                            self.pending_copy_job = Some(job_number);
+                            return PipelineDetailAction::CopyLogs(job_number);
+                        }
                     }
                 }
                 PipelineDetailAction::None
@@ -630,6 +665,9 @@ impl PipelineDetailScreen {
             // Render footer at index 2 (no powerline)
             self.render_footer(f, main_chunks[2]);
         }
+
+        // Render line range modal last (on top)
+        self.line_range_modal.render(f, area);
     }
 
     /// Render the combined header panel with pipeline information and breadcrumb
@@ -1080,6 +1118,7 @@ impl PipelineDetailScreen {
     }
 
     /// Calculate status summary for jobs
+    /// Calculate status summary for jobs with fixed-width formatting
     fn calculate_status_summary(&self) -> String {
         let mut passed = 0;
         let mut failed = 0;
@@ -1096,14 +1135,15 @@ impl PipelineDetailScreen {
 
         let mut parts = Vec::new();
 
+        // Use fixed-width formatting (2 digits) so single-digit numbers don't shift
         if passed > 0 {
-            parts.push(format!("✓ {}", passed));
+            parts.push(format!("✓ {:>2}", passed));
         }
         if running > 0 {
-            parts.push(format!("● {}", running));
+            parts.push(format!("● {:>2}", running));
         }
         if failed > 0 {
-            parts.push(format!("✗ {}", failed));
+            parts.push(format!("✗ {:>2}", failed));
         }
 
         if parts.is_empty() {
@@ -1112,8 +1152,6 @@ impl PipelineDetailScreen {
             format!("│ {}", parts.join("  "))
         }
     }
-
-    /// Render footer with keyboard shortcuts
     fn render_footer(&self, f: &mut Frame, area: Rect) {
         let mut footer_items = vec![
             Span::styled("[↑↓]", Style::default().fg(ACCENT)),
@@ -1189,35 +1227,7 @@ impl PipelineDetailScreen {
             .and_then(|idx| self.get_filtered_jobs().get(idx).map(|j| *j))
     }
 
-    /// Handle copy logs action - checks cache or triggers fetch
-    pub fn handle_copy_logs(&mut self, job_number: u32) {
-        if let Some(logs) = self.log_cache.get(&job_number) {
-            // Logs are cached, copy immediately
-            match Self::copy_to_clipboard(&logs.join("\n")) {
-                Ok(_) => {
-                    self.powerline.set_notification(
-                        format!("Copied {} lines to clipboard", logs.len()),
-                        crate::ui::widgets::powerline::NotificationLevel::Success,
-                        std::time::Duration::from_secs(2),
-                    );
-                }
-                Err(err) => {
-                    self.powerline.set_notification(
-                        err,
-                        crate::ui::widgets::powerline::NotificationLevel::Error,
-                        std::time::Duration::from_secs(3),
-                    );
-                }
-            }
-        } else {
-            // Logs not cached, trigger fetch
-            self.powerline
-                .set_loading("Loading logs...".to_string());
-            self.pending_log_fetch = Some(job_number);
-        }
-    }
-
-    /// Store fetched logs and trigger copy
+    /// Store fetched logs and show modal if copy was pending
     pub fn set_logs_for_job(&mut self, job_number: u32, logs: Vec<String>) {
         // Store in cache
         self.log_cache.insert(job_number, logs.clone());
@@ -1225,22 +1235,9 @@ impl PipelineDetailScreen {
         // Clear pending fetch
         self.pending_log_fetch = None;
 
-        // Copy to clipboard
-        match Self::copy_to_clipboard(&logs.join("\n")) {
-            Ok(_) => {
-                self.powerline.set_notification(
-                    format!("Copied {} lines to clipboard", logs.len()),
-                    crate::ui::widgets::powerline::NotificationLevel::Success,
-                    std::time::Duration::from_secs(2),
-                );
-            }
-            Err(err) => {
-                self.powerline.set_notification(
-                    err,
-                    crate::ui::widgets::powerline::NotificationLevel::Error,
-                    std::time::Duration::from_secs(3),
-                );
-            }
+        // If this was triggered by 'y', show the modal now
+        if self.pending_copy_job == Some(job_number) {
+            self.line_range_modal.show(logs.len());
         }
     }
 
@@ -1248,14 +1245,156 @@ impl PipelineDetailScreen {
     fn copy_to_clipboard(text: &str) -> Result<(), String> {
         use arboard::Clipboard;
 
-        Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(text))
-            .map_err(|e| format!("Clipboard unavailable: {}", e))
-    }
+        let mut clipboard = Clipboard::new()
+            .map_err(|e| format!("Clipboard unavailable: {}", e))?;
 
-    /// Update powerline state - call periodically to clear expired notifications
+        #[cfg(target_os = "linux")]
+        {
+            use arboard::SetExtLinux;
+            use std::time::{Duration, Instant};
+
+            clipboard
+                .set()
+                .wait_until(Instant::now() + Duration::from_millis(300))
+                .text(text.to_owned())
+                .map_err(|e| format!("Failed to copy: {}", e))
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            clipboard
+                .set_text(text)
+                .map_err(|e| format!("Failed to copy: {}", e))
+        }
+    }
     pub fn tick_powerline(&mut self) {
         self.powerline.tick();
+    }
+
+    /// Handle copying logs with a specified line range
+    fn handle_copy_logs_range(&mut self, job_number: u32, range_str: &str) {
+        if let Some(logs) = self.log_cache.get(&job_number) {
+            match Self::parse_line_range(range_str, logs.len()) {
+                Ok((start, end)) => {
+                    let lines_to_copy = Self::extract_line_range(logs, start, end);
+
+                    if lines_to_copy.is_empty() {
+                        self.powerline.set_notification(
+                            "No lines to copy".to_string(),
+                            crate::ui::widgets::powerline::NotificationLevel::Error,
+                            std::time::Duration::from_secs(2),
+                        );
+                        return;
+                    }
+
+                    match Self::copy_to_clipboard(&lines_to_copy.join("\n")) {
+                        Ok(_) => {
+                            let message = format!(
+                                "Copied lines {:>5}-{:<5} ({:>4} lines)",
+                                start,
+                                end,
+                                lines_to_copy.len()
+                            );
+                            self.powerline.set_notification(
+                                message,
+                                crate::ui::widgets::powerline::NotificationLevel::Success,
+                                std::time::Duration::from_secs(2),
+                            );
+                        }
+                        Err(err) => {
+                            self.powerline.set_notification(
+                                err,
+                                crate::ui::widgets::powerline::NotificationLevel::Error,
+                                std::time::Duration::from_secs(3),
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    self.powerline.set_notification(
+                        format!("Invalid range: {}", err),
+                        crate::ui::widgets::powerline::NotificationLevel::Error,
+                        std::time::Duration::from_secs(3),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Parse line range input with Vim-style syntax
+    /// Supports: "1,1000", "1:1000", "100,$", "%", "1000"
+    /// Returns (start_line, end_line) - both 1-indexed
+    fn parse_line_range(input: &str, max_lines: usize) -> Result<(usize, usize), String> {
+        let input = input.trim();
+
+        if input.is_empty() {
+            return Err("Empty input".to_string());
+        }
+
+        // Special case: "%" means all lines (1 to end)
+        if input == "%" {
+            return Ok((1, max_lines));
+        }
+
+        // Helper to parse a single position (number or "$")
+        let parse_position = |s: &str| -> Result<usize, String> {
+            let s = s.trim();
+            if s == "$" {
+                Ok(max_lines)
+            } else {
+                s.parse::<usize>()
+                    .map_err(|_| format!("Invalid line number: {}", s))
+            }
+        };
+
+        // Check for range format "start,end" or "start:end"
+        if let Some(sep_pos) = input.find(|c| c == ',' || c == ':') {
+            let (start_str, end_str) = input.split_at(sep_pos);
+            let end_str = &end_str[1..]; // Skip separator
+
+            let start = parse_position(start_str)?;
+            let end = parse_position(end_str)?;
+
+            if start < 1 {
+                return Err("Start line must be >= 1".to_string());
+            }
+            if end < start {
+                return Err("End line must be >= start line".to_string());
+            }
+            if start > max_lines {
+                return Err(format!("Start line {} exceeds total lines {}", start, max_lines));
+            }
+
+            let end_clamped = end.min(max_lines);
+            Ok((start, end_clamped))
+        } else {
+            // Single number means "1:N"
+            let end = parse_position(input)?;
+
+            if end < 1 {
+                return Err("Line number must be >= 1".to_string());
+            }
+
+            let end_clamped = end.min(max_lines);
+            Ok((1, end_clamped))
+        }
+    }
+
+    /// Extract line range from logs (1-indexed input)
+    fn extract_line_range(logs: &[String], start: usize, end: usize) -> Vec<String> {
+        if logs.is_empty() || start < 1 || end < start {
+            return Vec::new();
+        }
+
+        // Convert to 0-indexed
+        let start_idx = start.saturating_sub(1);
+        let end_idx = end.min(logs.len());
+
+        if start_idx >= logs.len() {
+            return Vec::new();
+        }
+
+        logs[start_idx..end_idx].to_vec()
     }
 }
 
