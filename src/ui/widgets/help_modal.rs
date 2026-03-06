@@ -13,6 +13,22 @@ use ratatui::{
     Frame,
 };
 
+/// ASCII logo lines - easy to modify
+const LOGO_LINES: &[&str] = &[
+    "                                     ,,,,,                                      ",
+    "                                   ,,;~~;; ,,                                   ",
+    "                                 ,'';+~~~~~~'',                                 ",
+    "                                ,'',~~~;;;~~,'',                                ",
+    "                                ,''',;;;;;;,''',                                ",
+    "                      ;;        ,'''',    ,'''',     ;;;        ;               ",
+    "              ;     ;;;;~; ;;;   ', ,,'''',,,,',  ;;~ ;    ;;;;                 ",
+    "                       ;;    ~;    ;~;,,,,;~;;   ;~; , ;                        ",
+    "                      ;    ;;    ;,. ~    ~ .,;   ,;;  ;                        ",
+    "           ;;;;;     ;,,  ~ '    ,            ,    ' +         ;;;;;;;;         ",
+    "        ;;;;;;;;;;; ;~,,  ;;,,,,,,     ;;     ,,,,,,;~       ;;;     ;;;        ",
+    "       ~~;      ;;;  ;;,,  ;;;  ;  ;;  ~ ; ,   ;; ;~~    ;;;;;        ; ;       ",
+];
+
 /// Help modal action
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelpAction {
@@ -66,9 +82,25 @@ impl HelpModal {
         f.render_widget(block, modal_area);
 
         // Create help content
-        let help_lines = vec![
-            Line::from(""),
-            // Global shortcuts
+        let mut help_lines = vec![
+        ];
+        
+        // === LOGO ASCII (easy to modify - see LOGO_LINES constant at top) ===
+        for line in LOGO_LINES.iter() {
+            help_lines.push(Line::from(*line).alignment(Alignment::Center));
+        }
+        help_lines.push(Line::from(""));
+        help_lines.push(
+            Line::from(Span::styled(
+                "CircleCI TUI",
+                Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            ))
+            .alignment(Alignment::Center)
+        );
+        help_lines.push(Line::from(""));
+        // === FIN LOGO ===
+        
+        help_lines.extend(vec![
             Line::from(Span::styled(
                 "GLOBAL SHORTCUTS",
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
@@ -284,7 +316,7 @@ impl HelpModal {
                 Style::default().fg(FG_DIM).add_modifier(Modifier::ITALIC),
             ))
             .alignment(Alignment::Center),
-        ];
+        ]);
 
         let help_paragraph = Paragraph::new(help_lines)
             .wrap(Wrap { trim: false })
