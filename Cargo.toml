@@ -2,6 +2,13 @@
 name = "circleci-tui-rs"
 version = "0.1.0"
 edition = "2021"
+authors = ["slamer59"]
+description = "A fast, keyboard-driven terminal UI for monitoring CircleCI pipelines (PoC)"
+repository = "https://github.com/slamer59/circleci-tui-rs"
+homepage = "https://github.com/slamer59/circleci-tui-rs"
+keywords = ["circleci", "tui", "terminal", "ci-cd", "monitoring"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -36,6 +43,7 @@ url = "2.3"
 ansi-to-tui = "8.0"
 git2 = "0.18"
 arboard = "3.4"
+dirs = "5.0"
 
 # Logging (optional, for debugging)
 # tracing = "0.1"
