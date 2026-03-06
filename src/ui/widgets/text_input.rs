@@ -9,7 +9,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
 
@@ -188,14 +188,18 @@ impl TextInput {
             Line::from(spans)
         };
 
-        let border_style = if self.focused {
-            Style::default().fg(theme::BORDER_FOCUSED)
+        let (border_style, border_type) = if self.focused {
+            (
+                Style::default().fg(theme::BORDER_FOCUSED),
+                BorderType::Double,
+            )
         } else {
-            Style::default().fg(theme::BORDER)
+            (Style::default().fg(theme::BORDER), BorderType::Rounded)
         };
 
         let block = Block::default()
             .borders(self.borders)
+            .border_type(border_type)
             .border_style(border_style);
 
         let paragraph = Paragraph::new(text).block(block);

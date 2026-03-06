@@ -1,6 +1,6 @@
 /// Job item rendering
 use crate::models::Job;
-use crate::theme::{get_status_color, get_status_icon, ACCENT, FG_DIM, FG_PRIMARY};
+use crate::theme::{get_status_color, get_status_icon, ACCENT, FG_DIM};
 use crate::ui::utils::truncate_string;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -37,7 +37,7 @@ pub fn render_job_item<'a>(job: &'a Job, selected: bool) -> Vec<Line<'a>> {
             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
             Span::styled(
                 format!("{:<30} ", job_name),
-                Style::default().fg(FG_PRIMARY),
+                Style::default().fg(FG_DIM),
             ),
             Span::styled(format!("[{}] ", job.executor), Style::default().fg(FG_DIM)),
             Span::styled(&job.duration, Style::default().fg(FG_DIM)),

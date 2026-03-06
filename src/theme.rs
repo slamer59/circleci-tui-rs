@@ -78,8 +78,11 @@ pub const CANCELED: Color = Color::Rgb(92, 99, 112); // #5c6370
 // Accent Colors
 // =============================================================================
 
-/// Primary accent color (bright magenta)
+/// Primary accent color (bright magenta) - will become Kraken Primary #F050F8
 pub const ACCENT: Color = Color::Rgb(247, 26, 189); // #f71abd
+
+/// Secondary accent color (cyan/light blue) - Voltage brand color for selected items
+pub const SECONDARY: Color = Color::Rgb(96, 240, 248); // #60F0F8
 
 /// Dimmed accent color (soft pink)
 pub const ACCENT_DIM: Color = Color::Rgb(247, 168, 179); // #f7a8b3

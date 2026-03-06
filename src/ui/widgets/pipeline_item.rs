@@ -1,6 +1,6 @@
 /// Pipeline item rendering
 use crate::models::Pipeline;
-use crate::theme::{get_status_color, get_status_icon, ACCENT, FG_DIM, FG_PRIMARY};
+use crate::theme::{get_status_color, get_status_icon, ACCENT, FG_DIM};
 use crate::ui::utils::truncate_string;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -40,15 +40,15 @@ pub fn render_pipeline_item<'a>(pipeline: &'a Pipeline, selected: bool) -> Vec<L
                 format!("[{}] ", pipeline.branch),
                 Style::default().fg(ACCENT),
             ),
-            Span::styled(format!("{} ", short_sha), Style::default().fg(FG_DIM)),
-            Span::styled(&pipeline.author, Style::default().fg(FG_DIM)),
+            Span::styled(format!("{} ", short_sha), Style::default().fg(ACCENT)),
+            Span::styled(&pipeline.author, Style::default().fg(ACCENT)),
         ])
     } else {
         Line::from(vec![
             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
             Span::styled(
                 format!("{:<50} ", commit_msg),
-                Style::default().fg(FG_PRIMARY),
+                Style::default().fg(FG_DIM),
             ),
             Span::styled(
                 format!("[{}] ", pipeline.branch),

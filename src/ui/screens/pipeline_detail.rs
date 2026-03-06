@@ -6,7 +6,7 @@
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, FG_BRIGHT, FG_DIM,
-    FG_PRIMARY, RUNNING,
+    FG_PRIMARY, RUNNING, SECONDARY,
 };
 use crate::ui::utils::truncate_string;
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
@@ -748,16 +748,25 @@ impl PipelineDetailScreen {
 
     /// Render the workflows panel (left side)
     fn render_workflows_panel(&mut self, f: &mut Frame, area: Rect) {
-        let border_style = if self.focus == PanelFocus::Workflows {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        let (border_style, border_type, title_style) = if self.focus == PanelFocus::Workflows {
+            (
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                BorderType::Double,
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            )
         } else {
-            Style::default().fg(ACCENT)
+            (
+                Style::default().fg(ACCENT),
+                BorderType::Rounded,
+                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+            )
         };
 
         let block = Block::default()
             .title(" WORKFLOWS ")
+            .title_style(title_style)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type)
             .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 
@@ -825,7 +834,7 @@ impl PipelineDetailScreen {
                                 format!("{:<20} ", truncate_string(&workflow.name, 18)),
                                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                             ),
-                            Span::styled(duration, Style::default().fg(FG_DIM)),
+                            Span::styled(duration, Style::default().fg(ACCENT)),
                         ])
                     } else {
                         Line::from(vec![
@@ -833,7 +842,7 @@ impl PipelineDetailScreen {
                             Span::styled(format!("{} ", icon), Style::default().fg(status_col)),
                             Span::styled(
                                 format!("{:<20} ", truncate_string(&workflow.name, 18)),
-                                Style::default().fg(FG_PRIMARY),
+                                Style::default().fg(FG_DIM),
                             ),
                             Span::styled(duration, Style::default().fg(FG_DIM)),
                         ])
@@ -875,17 +884,26 @@ impl PipelineDetailScreen {
     /// Render the faceted search bar (status and duration filters)
     fn render_faceted_search_bar(&mut self, f: &mut Frame, area: Rect) {
         // Determine border style based on focus - match pipelines.rs styling
-        let border_style = if self.focus == PanelFocus::Filters || self.faceted_search.is_active() {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        let (border_style, border_type, title_style) = if self.focus == PanelFocus::Filters || self.faceted_search.is_active() {
+            (
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                BorderType::Double,
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            )
         } else {
-            Style::default().fg(ACCENT)
+            (
+                Style::default().fg(ACCENT),
+                BorderType::Rounded,
+                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+            )
         };
 
         // Create bordered block for filter bar (complete borders like pipelines.rs)
         let block = Block::default()
             .title(" FILTERS ")
+            .title_style(title_style)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type)
             .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 
@@ -974,16 +992,25 @@ impl PipelineDetailScreen {
             status_summary
         );
 
-        let border_style = if self.focus == PanelFocus::Jobs {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        let (border_style, border_type, title_style) = if self.focus == PanelFocus::Jobs {
+            (
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                BorderType::Double,
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            )
         } else {
-            Style::default().fg(ACCENT)
+            (
+                Style::default().fg(ACCENT),
+                BorderType::Rounded,
+                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+            )
         };
 
         let block = Block::default()
             .title(title)
+            .title_style(title_style)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type)
             .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 

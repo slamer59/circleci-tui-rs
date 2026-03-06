@@ -5,7 +5,7 @@
 use crate::api::models::{mock_data, Pipeline, Workflow};
 use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER_FOCUSED, FG_BRIGHT, FG_DIM,
-    FG_PRIMARY,
+    FG_PRIMARY, SECONDARY,
 };
 use crate::ui::utils::{truncate_string, truncate_string_left};
 use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
@@ -421,17 +421,26 @@ impl PipelineScreen {
     /// Render unified filters panel containing search input and filter buttons
     fn render_filters_panel(&mut self, f: &mut Frame, area: Rect) {
         // Determine border style based on focus
-        let border_style = if self.search_focused || self.filter_active {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        let (border_style, border_type, title_style) = if self.search_focused || self.filter_active {
+            (
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                BorderType::Double,
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            )
         } else {
-            Style::default().fg(ACCENT)
+            (
+                Style::default().fg(ACCENT),
+                BorderType::Rounded,
+                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+            )
         };
 
         // Create bordered block for entire filters panel
         let block = Block::default()
             .title(" FILTERS ")
+            .title_style(title_style)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type)
             .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 
@@ -467,16 +476,25 @@ impl PipelineScreen {
         };
 
         // Determine border style - bold when list is focused (not in search/filter mode)
-        let border_style = if !self.search_focused && !self.filter_active {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        let (border_style, border_type, title_style) = if !self.search_focused && !self.filter_active {
+            (
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                BorderType::Double,
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            )
         } else {
-            Style::default().fg(ACCENT)
+            (
+                Style::default().fg(ACCENT),
+                BorderType::Rounded,
+                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+            )
         };
 
         let block = Block::default()
             .title(title)
+            .title_style(title_style)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(border_type)
             .border_style(border_style)
             .style(Style::default().bg(BG_PANEL));
 
