@@ -93,10 +93,12 @@ pub struct PipelineDetailScreen {
     pub confirm_workflow_id: Option<String>,
     /// Spinner for loading state
     pub spinner: Spinner,
-    /// Cache of fetched logs by job number
+    /// Cache of fetched logs by job number (populated by prefetch system for yank operations)
     pub log_cache: HashMap<u32, Vec<String>>,
     /// Pending log fetch request (job number)
     pub pending_log_fetch: Option<u32>,
+    /// Previous visible job numbers for prefetch tracking
+    pub previous_visible_jobs: Vec<u32>,
     /// Line range modal for yank operations
     pub line_range_modal: LineRangeModal,
     /// Job number pending copy operation (waiting for modal confirmation)
@@ -179,6 +181,7 @@ impl PipelineDetailScreen {
             line_range_modal: LineRangeModal::new(),
             pending_copy_job: None,
             powerline: PowerlineBar::new(),
+            previous_visible_jobs: Vec::new(),
         }
     }
 
@@ -1225,6 +1228,31 @@ impl PipelineDetailScreen {
     pub fn get_selected_job(&self) -> Option<&Job> {
         self.selected_job_index
             .and_then(|idx| self.get_filtered_jobs().get(idx).map(|j| *j))
+    }
+
+    /// Calculate visible job numbers for prefetching based on viewport and selection
+    pub fn get_visible_job_numbers(&self, _viewport_height: u16) -> Vec<u32> {
+        const PREFETCH_AHEAD: usize = 3;
+        const PREFETCH_BEHIND: usize = 3;
+
+        let filtered_jobs = self.get_filtered_jobs();
+
+        if filtered_jobs.is_empty() {
+            return Vec::new();
+        }
+
+        // Get selected index (default to 0)
+        let selected = self.selected_job_index.unwrap_or(0);
+
+        // Calculate prefetch range with N jobs ahead/behind
+        let start = selected.saturating_sub(PREFETCH_BEHIND);
+        let end = (selected + PREFETCH_AHEAD + 1).min(filtered_jobs.len());
+
+        // Extract job numbers from filtered list
+        filtered_jobs[start..end]
+            .iter()
+            .map(|job| job.job_number)
+            .collect()
     }
 
     /// Store fetched logs and show modal if copy was pending

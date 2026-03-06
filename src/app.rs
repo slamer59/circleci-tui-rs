@@ -5,6 +5,7 @@
 
 use crate::api::client::CircleCIClient;
 use crate::api::models::{Job, Pipeline};
+use crate::cache::{LogCacheManager, PrefetchCoordinator};
 use crate::config::Config;
 use crate::preferences::PreferencesManager;
 use crate::ui::screens::{PipelineDetailAction, PipelineDetailScreen, PipelineScreen};
@@ -70,6 +71,10 @@ pub struct App {
     pub authenticated_user: Option<String>,
     /// Preferences manager
     pub preferences: PreferencesManager,
+    /// Log cache manager for disk-based caching
+    pub log_cache_manager: LogCacheManager,
+    /// Prefetch coordinator for async log prefetching
+    pub prefetch_coordinator: PrefetchCoordinator,
 }
 
 impl App {
@@ -138,6 +143,16 @@ impl App {
             authenticated_user_name.clone(),
         );
 
+        // Initialize log cache manager
+        let log_cache_manager = LogCacheManager::new()?;
+        log_cache_manager.cleanup_old_entries()?; // Run cleanup on startup
+
+        // Initialize prefetch coordinator
+        let prefetch_coordinator = PrefetchCoordinator::new(
+            Arc::new(log_cache_manager.clone()),
+            Arc::clone(&api_client),
+        );
+
         Ok(Self {
             current_screen: Screen::Pipelines,
             pipeline_screen,
@@ -158,6 +173,8 @@ impl App {
             pending_load_more_jobs: None,
             authenticated_user,
             preferences,
+            log_cache_manager,
+            prefetch_coordinator,
         })
     }
 
@@ -747,15 +764,40 @@ impl App {
     ///
     /// This is an async method that fetches job logs and updates the modal.
     pub async fn load_job_logs(&mut self, job_number: u32) -> Result<()> {
-        // Fetch logs from API
-        let logs = self.api_client.stream_job_log(job_number).await?;
+        use crate::cache::log_cache::CacheStatus;
 
-        // Update modal with logs
-        if let Some(modal) = &mut self.log_modal {
-            modal.set_logs(logs);
+        // Check cache first
+        match self.log_cache_manager.get(job_number) {
+            Ok(CacheStatus::Valid(entry)) => {
+                // Cache hit - use cached logs
+                if let Some(modal) = &mut self.log_modal {
+                    modal.set_logs(entry.logs);
+                }
+                return Ok(());
+            }
+            _ => {
+                // Cache miss or stale, fetch from API
+                let logs = self.api_client.stream_job_log(job_number).await?;
+
+                // Cache the result if job is completed
+                if let Some(modal) = &self.log_modal {
+                    let job_status = &modal.job.status;
+                    if job_status != "running" {
+                        let _ = self.log_cache_manager.put(
+                            job_number,
+                            logs.clone(),
+                            job_status.clone(),
+                        );
+                    }
+                }
+
+                // Update modal with logs
+                if let Some(modal) = &mut self.log_modal {
+                    modal.set_logs(logs);
+                }
+                Ok(())
+            }
         }
-
-        Ok(())
     }
 
     /// Check if the log modal needs to refresh logs
@@ -768,6 +810,46 @@ impl App {
             }
         }
         None
+    }
+
+    /// Trigger prefetch for visible jobs
+    pub fn trigger_prefetch(&mut self, viewport_height: u16) {
+        if let Some(detail) = &self.pipeline_detail_screen {
+            let visible_jobs = detail.get_visible_job_numbers(viewport_height);
+
+            // Get full job details for status checking
+            let jobs: Vec<crate::api::models::Job> = detail.jobs.clone();
+
+            // Cancel tasks for jobs no longer visible
+            let previous = &detail.previous_visible_jobs;
+            let to_cancel: Vec<u32> = previous
+                .iter()
+                .filter(|j| !visible_jobs.contains(j))
+                .cloned()
+                .collect();
+            self.prefetch_coordinator.cancel_jobs(to_cancel);
+
+            // Start prefetch for visible jobs
+            self.prefetch_coordinator.prefetch_jobs(visible_jobs.clone(), jobs);
+
+            // Update tracking
+            if let Some(detail) = &mut self.pipeline_detail_screen {
+                detail.previous_visible_jobs = visible_jobs;
+            }
+        }
+    }
+
+    /// Poll prefetch results (non-blocking)
+    pub fn process_prefetch_results(&mut self) {
+        let results = self.prefetch_coordinator.poll_results();
+        for result in results {
+            // Results are already cached by the worker
+            // Optionally log errors, but don't block UI
+            if let Err(_e) = result.result {
+                // Could show error in status message if desired
+                // For now, silently continue - prefetch is best-effort
+            }
+        }
     }
 
     /// Check if workflows need to be loaded
@@ -810,8 +892,35 @@ impl App {
 
     /// Fetch logs for powerline display and copy
     pub async fn fetch_powerline_logs(&mut self, job_number: u32) -> Result<()> {
-        // Fetch logs from API
-        let logs = self.api_client.stream_job_log(job_number).await?;
+        use crate::cache::log_cache::CacheStatus;
+
+        // Check cache first
+        let logs = match self.log_cache_manager.get(job_number) {
+            Ok(CacheStatus::Valid(entry)) => {
+                // Cache hit - use cached logs
+                entry.logs
+            }
+            _ => {
+                // Cache miss or stale, fetch from API
+                let fetched_logs = self.api_client.stream_job_log(job_number).await?;
+
+                // Cache the result if job is completed
+                // We need to determine job status from the screen
+                if let Some(detail) = &self.pipeline_detail_screen {
+                    if let Some(job) = detail.jobs.iter().find(|j| j.job_number == job_number) {
+                        if job.status != "running" {
+                            let _ = self.log_cache_manager.put(
+                                job_number,
+                                fetched_logs.clone(),
+                                job.status.clone(),
+                            );
+                        }
+                    }
+                }
+
+                fetched_logs
+            }
+        };
 
         // Pass logs to pipeline detail screen
         if let Some(detail) = &mut self.pipeline_detail_screen {

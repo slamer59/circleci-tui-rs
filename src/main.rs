@@ -15,6 +15,7 @@ use std::io;
 
 mod api;
 mod app;
+mod cache;
 mod config;
 mod events;
 mod git;
@@ -87,6 +88,13 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
 
         // Tick powerline to handle notification expiry
         app.tick_powerline();
+
+        // Process prefetch results (non-blocking)
+        app.process_prefetch_results();
+
+        // Trigger prefetch for visible jobs (viewport-based)
+        let terminal_height = terminal.size()?.height;
+        app.trigger_prefetch(terminal_height);
 
         // Handle input events with a timeout (50ms for smooth animations)
         if event::poll(Duration::from_millis(50))? {
