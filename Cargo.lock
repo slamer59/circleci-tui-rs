@@ -195,6 +195,7 @@ dependencies = [
  "git2",
  "mockito",
  "ratatui",
+ "ratatui-core",
  "reqwest",
  "serde",
  "serde_json",

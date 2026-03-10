@@ -361,9 +361,24 @@ impl LogModal {
                                 .spans
                                 .iter()
                                 .map(|ansi_span| {
-                                    // Convert ansi-to-tui Span to ratatui Span
-                                    // Just use the content - colors will be parsed but basic styling is enough
-                                    Span::raw(ansi_span.content.to_string())
+                                    // Build ratatui Style from ansi-to-tui style components
+                                    let mut style = Style::default();
+
+                                    // Convert foreground color if present
+                                    if let Some(fg) = ansi_span.style.fg {
+                                        style = style.fg(Self::convert_color(fg));
+                                    }
+
+                                    // Convert background color if present
+                                    if let Some(bg) = ansi_span.style.bg {
+                                        style = style.bg(Self::convert_color(bg));
+                                    }
+
+                                    // Convert modifiers
+                                    style = style.add_modifier(Self::convert_modifier(ansi_span.style.add_modifier));
+                                    style = style.remove_modifier(Self::convert_modifier(ansi_span.style.sub_modifier));
+
+                                    Span::styled(ansi_span.content.to_string(), style)
                                 })
                                 .collect();
                             Line::from(spans)
@@ -441,6 +456,70 @@ impl LogModal {
         let footer = Paragraph::new(footer_text).style(Style::default().bg(BG_PANEL));
 
         f.render_widget(footer, area);
+    }
+
+    /// Convert ratatui-core Color to ratatui Color
+    fn convert_color(color: ratatui_core::style::Color) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        use ratatui_core::style::Color as CoreColor;
+
+        match color {
+            CoreColor::Reset => Color::Reset,
+            CoreColor::Black => Color::Black,
+            CoreColor::Red => Color::Red,
+            CoreColor::Green => Color::Green,
+            CoreColor::Yellow => Color::Yellow,
+            CoreColor::Blue => Color::Blue,
+            CoreColor::Magenta => Color::Magenta,
+            CoreColor::Cyan => Color::Cyan,
+            CoreColor::Gray => Color::Gray,
+            CoreColor::DarkGray => Color::DarkGray,
+            CoreColor::LightRed => Color::LightRed,
+            CoreColor::LightGreen => Color::LightGreen,
+            CoreColor::LightYellow => Color::LightYellow,
+            CoreColor::LightBlue => Color::LightBlue,
+            CoreColor::LightMagenta => Color::LightMagenta,
+            CoreColor::LightCyan => Color::LightCyan,
+            CoreColor::White => Color::White,
+            CoreColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
+            CoreColor::Indexed(i) => Color::Indexed(i),
+        }
+    }
+
+    /// Convert ratatui-core Modifier to ratatui Modifier
+    fn convert_modifier(modifier: ratatui_core::style::Modifier) -> ratatui::style::Modifier {
+        use ratatui::style::Modifier;
+        use ratatui_core::style::Modifier as CoreModifier;
+
+        let mut result = Modifier::empty();
+        if modifier.contains(CoreModifier::BOLD) {
+            result |= Modifier::BOLD;
+        }
+        if modifier.contains(CoreModifier::DIM) {
+            result |= Modifier::DIM;
+        }
+        if modifier.contains(CoreModifier::ITALIC) {
+            result |= Modifier::ITALIC;
+        }
+        if modifier.contains(CoreModifier::UNDERLINED) {
+            result |= Modifier::UNDERLINED;
+        }
+        if modifier.contains(CoreModifier::SLOW_BLINK) {
+            result |= Modifier::SLOW_BLINK;
+        }
+        if modifier.contains(CoreModifier::RAPID_BLINK) {
+            result |= Modifier::RAPID_BLINK;
+        }
+        if modifier.contains(CoreModifier::REVERSED) {
+            result |= Modifier::REVERSED;
+        }
+        if modifier.contains(CoreModifier::HIDDEN) {
+            result |= Modifier::HIDDEN;
+        }
+        if modifier.contains(CoreModifier::CROSSED_OUT) {
+            result |= Modifier::CROSSED_OUT;
+        }
+        result
     }
 
     /// Apply syntax highlighting to a log line (returns owned Line)

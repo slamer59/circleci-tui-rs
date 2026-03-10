@@ -41,6 +41,7 @@ confy = { version = "0.6", default-features = false, features = ["yaml_conf"] }
 chrono = { version = "0.4.31", default-features = false, features = ["serde", "clock"] }
 url = "2.3"
 ansi-to-tui = "8.0"
+ratatui-core = "0.1"
 git2 = "0.18"
 arboard = "3.4"
 dirs = "5.0"
