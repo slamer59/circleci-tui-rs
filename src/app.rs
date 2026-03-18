@@ -4,7 +4,7 @@
 //! handles events, and coordinates between different screens.
 
 use crate::api::client::CircleCIClient;
-use crate::api::models::{Job, Pipeline};
+use crate::api::models::{Job, Pipeline, Workflow};
 use crate::cache::{LogCacheManager, PrefetchCoordinator};
 use crate::config::Config;
 use crate::preferences::PreferencesManager;
@@ -20,6 +20,35 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Frame;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+
+/// Results from background API tasks
+pub enum BgTaskResult {
+    LogsLoaded {
+        job_number: u32,
+        logs: Vec<String>,
+        job_status: Option<String>,
+    },
+    LogsError(anyhow::Error),
+    WorkflowsLoaded(Vec<Workflow>),
+    WorkflowsError(anyhow::Error),
+    JobsLoaded {
+        jobs: Vec<Job>,
+        next_page_token: Option<String>,
+    },
+    JobsError(anyhow::Error),
+    MoreJobsLoaded {
+        jobs: Vec<Job>,
+        next_page_token: Option<String>,
+    },
+    MoreJobsError(anyhow::Error),
+    PowerlineLogsLoaded {
+        job_number: u32,
+        logs: Vec<String>,
+        job_status: Option<String>,
+    },
+    PowerlineLogsError(anyhow::Error),
+}
 
 /// Application screens
 #[derive(Debug, Clone)]
@@ -70,6 +99,10 @@ pub struct App {
     pub log_cache_manager: LogCacheManager,
     /// Prefetch coordinator for async log prefetching
     pub prefetch_coordinator: PrefetchCoordinator,
+    /// Channel sender for background task results
+    pub bg_sender: mpsc::UnboundedSender<BgTaskResult>,
+    /// Channel receiver for background task results
+    pub bg_receiver: mpsc::UnboundedReceiver<BgTaskResult>,
 }
 
 impl App {
@@ -151,6 +184,8 @@ impl App {
         let prefetch_coordinator =
             PrefetchCoordinator::new(Arc::new(log_cache_manager.clone()), Arc::clone(&api_client));
 
+        let (bg_sender, bg_receiver) = mpsc::unbounded_channel();
+
         Ok(Self {
             current_screen: Screen::Pipelines,
             pipeline_screen,
@@ -171,6 +206,8 @@ impl App {
             preferences,
             log_cache_manager,
             prefetch_coordinator,
+            bg_sender,
+            bg_receiver,
         })
     }
 
@@ -604,141 +641,6 @@ impl App {
             .set_pipeline_workflows(pipeline_workflows);
     }
 
-    /// Load workflows for a pipeline
-    ///
-    /// This is an async method that fetches workflows and updates the detail screen.
-    pub async fn load_workflows(&mut self, pipeline_id: &str) -> Result<()> {
-        self.is_loading = true;
-
-        // Fetch workflows from API
-        match self.api_client.get_workflows(pipeline_id).await {
-            Ok(workflows) => {
-                // Update detail screen with workflows
-                if let Some(detail) = &mut self.pipeline_detail_screen {
-                    detail.set_workflows(workflows.clone());
-                    detail.loading_workflows = false;
-
-                    // Auto-load jobs for the first workflow
-                    if !workflows.is_empty() {
-                        detail.loading_jobs = true;
-                        self.pending_job_load = Some(workflows[0].id.clone());
-                    }
-                }
-            }
-            Err(e) => {
-                // Show error modal
-                self.show_api_error(e.into());
-                if let Some(detail) = &mut self.pipeline_detail_screen {
-                    detail.loading_workflows = false;
-                }
-            }
-        }
-
-        self.is_loading = false;
-        Ok(())
-    }
-
-    /// Load jobs for a workflow
-    ///
-    /// This is an async method that fetches jobs and updates the detail screen.
-    pub async fn load_jobs(&mut self, workflow_id: &str) -> Result<()> {
-        self.is_loading = true;
-
-        // Fetch jobs from API (returns tuple with pagination info)
-        match self.api_client.get_jobs(workflow_id).await {
-            Ok((jobs, next_page_token)) => {
-                // Update detail screen with jobs and pagination info
-                if let Some(detail) = &mut self.pipeline_detail_screen {
-                    detail.set_jobs_with_pagination(jobs, next_page_token, None);
-                    detail.loading_jobs = false;
-                }
-            }
-            Err(e) => {
-                // Show error modal
-                self.show_api_error(e.into());
-                if let Some(detail) = &mut self.pipeline_detail_screen {
-                    detail.loading_jobs = false;
-                }
-            }
-        }
-
-        self.is_loading = false;
-        Ok(())
-    }
-
-    /// Load more jobs for the current workflow (pagination)
-    ///
-    /// This is an async method that fetches the next page of jobs.
-    pub async fn load_more_jobs(&mut self, workflow_id: &str) -> Result<()> {
-        // Get the next page token from the detail screen
-        let page_token = if let Some(detail) = &self.pipeline_detail_screen {
-            detail.next_page_token.clone()
-        } else {
-            return Ok(());
-        };
-
-        if let Some(token) = page_token {
-            // Set loading state
-            if let Some(detail) = &mut self.pipeline_detail_screen {
-                detail.loading_more_jobs = true;
-            }
-
-            // Fetch next page of jobs
-            let (jobs, next_page_token) = self
-                .api_client
-                .get_jobs_page(workflow_id, Some(&token))
-                .await?;
-
-            // Append jobs to existing list
-            if let Some(detail) = &mut self.pipeline_detail_screen {
-                detail.append_jobs(jobs, next_page_token);
-                detail.loading_more_jobs = false;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Load logs for a job
-    ///
-    /// This is an async method that fetches job logs and updates the modal.
-    pub async fn load_job_logs(&mut self, job_number: u32) -> Result<()> {
-        use crate::cache::log_cache::CacheStatus;
-
-        // Check cache first
-        match self.log_cache_manager.get(job_number) {
-            Ok(CacheStatus::Valid(entry)) => {
-                // Cache hit - use cached logs
-                if let Some(modal) = &mut self.log_modal {
-                    modal.set_logs(entry.logs);
-                }
-                Ok(())
-            }
-            _ => {
-                // Cache miss or stale, fetch from API
-                let logs = self.api_client.stream_job_log(job_number).await?;
-
-                // Cache the result if job is completed
-                if let Some(modal) = &self.log_modal {
-                    let job_status = &modal.job.status;
-                    if job_status != "running" {
-                        let _ = self.log_cache_manager.put(
-                            job_number,
-                            logs.clone(),
-                            job_status.clone(),
-                        );
-                    }
-                }
-
-                // Update modal with logs
-                if let Some(modal) = &mut self.log_modal {
-                    modal.set_logs(logs);
-                }
-                Ok(())
-            }
-        }
-    }
-
     /// Check if the log modal needs to refresh logs
     ///
     /// This should be called in the event loop to auto-refresh streaming logs.
@@ -792,82 +694,12 @@ impl App {
         }
     }
 
-    /// Check if workflows need to be loaded
-    ///
-    /// Returns the pipeline_id if workflows need to be loaded.
-    pub fn should_load_workflows(&self) -> Option<String> {
-        self.pending_workflow_load.clone()
-    }
-
-    /// Check if jobs need to be loaded
-    ///
-    /// Returns the workflow_id if jobs need to be loaded.
-    pub fn should_load_jobs(&self) -> Option<String> {
-        self.pending_job_load.clone()
-    }
-
-    /// Check if more jobs need to be loaded (pagination)
-    ///
-    /// Returns the workflow_id if more jobs need to be loaded.
-    pub fn should_load_more_jobs(&self) -> Option<String> {
-        self.pending_load_more_jobs.clone()
-    }
-
     /// Trigger job loading for the selected workflow
-    ///
-    /// This is called when the user navigates between workflows.
     pub fn trigger_job_load(&mut self, workflow_id: String) {
         if let Some(detail) = &mut self.pipeline_detail_screen {
             detail.loading_jobs = true;
         }
         self.pending_job_load = Some(workflow_id);
-    }
-
-    /// Check if pipeline detail screen needs to fetch logs for powerline
-    pub fn should_fetch_powerline_logs(&self) -> Option<u32> {
-        self.pipeline_detail_screen
-            .as_ref()
-            .and_then(|detail| detail.pending_log_fetch)
-    }
-
-    /// Fetch logs for powerline display and copy
-    pub async fn fetch_powerline_logs(&mut self, job_number: u32) -> Result<()> {
-        use crate::cache::log_cache::CacheStatus;
-
-        // Check cache first
-        let logs = match self.log_cache_manager.get(job_number) {
-            Ok(CacheStatus::Valid(entry)) => {
-                // Cache hit - use cached logs
-                entry.logs
-            }
-            _ => {
-                // Cache miss or stale, fetch from API
-                let fetched_logs = self.api_client.stream_job_log(job_number).await?;
-
-                // Cache the result if job is completed
-                // We need to determine job status from the screen
-                if let Some(detail) = &self.pipeline_detail_screen {
-                    if let Some(job) = detail.jobs.iter().find(|j| j.job_number == job_number) {
-                        if job.status != "running" {
-                            let _ = self.log_cache_manager.put(
-                                job_number,
-                                fetched_logs.clone(),
-                                job.status.clone(),
-                            );
-                        }
-                    }
-                }
-
-                fetched_logs
-            }
-        };
-
-        // Pass logs to pipeline detail screen
-        if let Some(detail) = &mut self.pipeline_detail_screen {
-            detail.set_logs_for_job(job_number, logs);
-        }
-
-        Ok(())
     }
 
     /// Tick powerline to handle notification expiry
@@ -877,8 +709,244 @@ impl App {
         }
     }
 
-    /// Save current filter state to preferences
-    /// Save current filter state to preferences
+    /// Spawn a background task to load job logs (non-blocking)
+    pub fn spawn_log_load(&mut self, job_number: u32) {
+        use crate::cache::log_cache::CacheStatus;
+
+        // Check cache first (sync, fast)
+        if let Ok(CacheStatus::Valid(entry)) = self.log_cache_manager.get(job_number) {
+            if let Some(modal) = &mut self.log_modal {
+                modal.set_logs(entry.logs);
+            }
+            return;
+        }
+
+        // Cache miss - get job status for caching later
+        let job_status = self.log_modal.as_ref().map(|m| m.job.status.clone());
+
+        let client = Arc::clone(&self.api_client);
+        let tx = self.bg_sender.clone();
+        tokio::spawn(async move {
+            match client.stream_job_log(job_number).await {
+                Ok(logs) => {
+                    let _ = tx.send(BgTaskResult::LogsLoaded {
+                        job_number,
+                        logs,
+                        job_status,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(BgTaskResult::LogsError(e.into()));
+                }
+            }
+        });
+    }
+
+    /// Spawn a background task to load workflows (non-blocking)
+    pub fn spawn_workflow_load(&mut self, pipeline_id: String) {
+        self.is_loading = true;
+        let client = Arc::clone(&self.api_client);
+        let tx = self.bg_sender.clone();
+        tokio::spawn(async move {
+            match client.get_workflows(&pipeline_id).await {
+                Ok(workflows) => {
+                    let _ = tx.send(BgTaskResult::WorkflowsLoaded(workflows));
+                }
+                Err(e) => {
+                    let _ = tx.send(BgTaskResult::WorkflowsError(e.into()));
+                }
+            }
+        });
+    }
+
+    /// Spawn a background task to load jobs (non-blocking)
+    pub fn spawn_job_load(&mut self, workflow_id: String) {
+        self.is_loading = true;
+        let client = Arc::clone(&self.api_client);
+        let tx = self.bg_sender.clone();
+        tokio::spawn(async move {
+            match client.get_jobs(&workflow_id).await {
+                Ok((jobs, next_page_token)) => {
+                    let _ = tx.send(BgTaskResult::JobsLoaded {
+                        jobs,
+                        next_page_token,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(BgTaskResult::JobsError(e.into()));
+                }
+            }
+        });
+    }
+
+    /// Spawn a background task to load more jobs (non-blocking)
+    pub fn spawn_more_jobs_load(&mut self, workflow_id: String, page_token: String) {
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.loading_more_jobs = true;
+        }
+        let client = Arc::clone(&self.api_client);
+        let tx = self.bg_sender.clone();
+        tokio::spawn(async move {
+            match client.get_jobs_page(&workflow_id, Some(&page_token)).await {
+                Ok((jobs, next_page_token)) => {
+                    let _ = tx.send(BgTaskResult::MoreJobsLoaded {
+                        jobs,
+                        next_page_token,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(BgTaskResult::MoreJobsError(e.into()));
+                }
+            }
+        });
+    }
+
+    /// Spawn a background task to fetch powerline logs (non-blocking)
+    pub fn spawn_powerline_log_load(&mut self, job_number: u32) {
+        use crate::cache::log_cache::CacheStatus;
+
+        // Clear the pending flag immediately
+        if let Some(detail) = &mut self.pipeline_detail_screen {
+            detail.pending_log_fetch = None;
+        }
+
+        // Check cache first (sync, fast)
+        if let Ok(CacheStatus::Valid(entry)) = self.log_cache_manager.get(job_number) {
+            if let Some(detail) = &mut self.pipeline_detail_screen {
+                detail.set_logs_for_job(job_number, entry.logs);
+            }
+            return;
+        }
+
+        // Get job status for caching later
+        let job_status = self.pipeline_detail_screen.as_ref().and_then(|detail| {
+            detail
+                .jobs
+                .iter()
+                .find(|j| j.job_number == job_number)
+                .map(|j| j.status.clone())
+        });
+
+        let client = Arc::clone(&self.api_client);
+        let tx = self.bg_sender.clone();
+        tokio::spawn(async move {
+            match client.stream_job_log(job_number).await {
+                Ok(logs) => {
+                    let _ = tx.send(BgTaskResult::PowerlineLogsLoaded {
+                        job_number,
+                        logs,
+                        job_status,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(BgTaskResult::PowerlineLogsError(e.into()));
+                }
+            }
+        });
+    }
+
+    /// Process completed background task results (non-blocking)
+    pub fn process_bg_results(&mut self) {
+        while let Ok(result) = self.bg_receiver.try_recv() {
+            match result {
+                BgTaskResult::LogsLoaded {
+                    job_number,
+                    logs,
+                    job_status,
+                } => {
+                    // Cache the result if job is completed
+                    if let Some(status) = &job_status {
+                        if status != "running" {
+                            let _ = self.log_cache_manager.put(
+                                job_number,
+                                logs.clone(),
+                                status.clone(),
+                            );
+                        }
+                    }
+                    if let Some(modal) = &mut self.log_modal {
+                        modal.set_logs(logs);
+                    }
+                }
+                BgTaskResult::LogsError(e) => {
+                    self.show_api_error(e);
+                }
+                BgTaskResult::WorkflowsLoaded(workflows) => {
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        detail.set_workflows(workflows.clone());
+                        detail.loading_workflows = false;
+                        if !workflows.is_empty() {
+                            detail.loading_jobs = true;
+                            self.pending_job_load = Some(workflows[0].id.clone());
+                        }
+                    }
+                    self.is_loading = false;
+                }
+                BgTaskResult::WorkflowsError(e) => {
+                    self.show_api_error(e);
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        detail.loading_workflows = false;
+                    }
+                    self.is_loading = false;
+                }
+                BgTaskResult::JobsLoaded {
+                    jobs,
+                    next_page_token,
+                } => {
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        detail.set_jobs_with_pagination(jobs, next_page_token, None);
+                        detail.loading_jobs = false;
+                    }
+                    self.is_loading = false;
+                }
+                BgTaskResult::JobsError(e) => {
+                    self.show_api_error(e);
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        detail.loading_jobs = false;
+                    }
+                    self.is_loading = false;
+                }
+                BgTaskResult::MoreJobsLoaded {
+                    jobs,
+                    next_page_token,
+                } => {
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        detail.append_jobs(jobs, next_page_token);
+                        detail.loading_more_jobs = false;
+                    }
+                }
+                BgTaskResult::MoreJobsError(e) => {
+                    self.show_api_error(e);
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        detail.loading_more_jobs = false;
+                    }
+                }
+                BgTaskResult::PowerlineLogsLoaded {
+                    job_number,
+                    logs,
+                    job_status,
+                } => {
+                    // Cache the result if job is completed
+                    if let Some(status) = &job_status {
+                        if status != "running" {
+                            let _ = self.log_cache_manager.put(
+                                job_number,
+                                logs.clone(),
+                                status.clone(),
+                            );
+                        }
+                    }
+                    if let Some(detail) = &mut self.pipeline_detail_screen {
+                        detail.set_logs_for_job(job_number, logs);
+                    }
+                }
+                BgTaskResult::PowerlineLogsError(e) => {
+                    self.show_api_error(e);
+                }
+            }
+        }
+    }
+
     pub fn save_preferences(&mut self) -> Result<()> {
         // Extract current filter state from pipeline screen (Screen 1)
         let filter_prefs = self.pipeline_screen.get_filter_preferences();

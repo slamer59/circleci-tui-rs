@@ -110,6 +110,11 @@ impl LogModal {
         self.is_streaming && self.last_fetch.elapsed().as_secs() >= 2
     }
 
+    /// Mark that a refresh has been started (prevents duplicate spawns)
+    pub fn mark_refresh_started(&mut self) {
+        self.last_fetch = Instant::now();
+    }
+
     /// Get the job number for this modal
     pub fn job_number(&self) -> u32 {
         self.job.job_number

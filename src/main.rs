@@ -33,57 +33,55 @@ use std::time::Duration;
 /// Run the application with async support for log streaming
 async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()> {
     loop {
+        // Process completed background tasks (non-blocking)
+        app.process_bg_results();
+
         // Draw the UI
         terminal.draw(|f| app.render(f))?;
 
         // Check if we need to load logs (initial load for newly opened modal)
-        if let Some(job_number) = app.pending_log_load {
-            app.pending_log_load = None;
-            if let Err(e) = app.load_job_logs(job_number).await {
-                app.show_api_error(e);
-            }
+        if let Some(job_number) = app.pending_log_load.take() {
+            app.spawn_log_load(job_number);
         }
 
         // Check if we need to refresh logs for streaming jobs
         if let Some(job_number) = app.should_refresh_logs() {
-            // Spawn a task to load logs without blocking the UI
-            if let Err(e) = app.load_job_logs(job_number).await {
-                app.show_api_error(e);
+            // Mark refresh started to prevent duplicate spawns
+            if let Some(modal) = &mut app.log_modal {
+                modal.mark_refresh_started();
             }
+            app.spawn_log_load(job_number);
         }
 
         // Check if we need to load workflows
-        if let Some(pipeline_id) = app.should_load_workflows() {
-            // Clear the pending flag
-            app.pending_workflow_load = None;
-            // Load workflows (errors are handled inside load_workflows via show_api_error)
-            let _ = app.load_workflows(&pipeline_id).await;
+        if let Some(pipeline_id) = app.pending_workflow_load.take() {
+            app.spawn_workflow_load(pipeline_id);
         }
 
         // Check if we need to load jobs
-        if let Some(workflow_id) = app.should_load_jobs() {
-            // Clear the pending flag
-            app.pending_job_load = None;
-            // Load jobs (errors are handled inside load_jobs via show_api_error)
-            let _ = app.load_jobs(&workflow_id).await;
+        if let Some(workflow_id) = app.pending_job_load.take() {
+            app.spawn_job_load(workflow_id);
         }
 
         // Check if we need to load more jobs (pagination)
-        if let Some(workflow_id) = app.should_load_more_jobs() {
-            // Clear the pending flag
-            app.pending_load_more_jobs = None;
-            // Load more jobs
-            if let Err(e) = app.load_more_jobs(&workflow_id).await {
-                app.show_api_error(e);
+        if let Some(workflow_id) = app.pending_load_more_jobs.take() {
+            // Get page token before spawning
+            let page_token = app
+                .pipeline_detail_screen
+                .as_ref()
+                .and_then(|d| d.next_page_token.clone());
+            if let Some(token) = page_token {
+                app.spawn_more_jobs_load(workflow_id, token);
             }
         }
 
         // Check if pipeline detail screen needs to fetch logs for powerline
-        if let Some(job_number) = app.should_fetch_powerline_logs() {
-            // Fetch logs and pass to screen
-            if let Err(e) = app.fetch_powerline_logs(job_number).await {
-                app.show_api_error(e);
-            }
+        if let Some(job_number) = app
+            .pipeline_detail_screen
+            .as_ref()
+            .and_then(|detail| detail.pending_log_fetch)
+        {
+            app.spawn_powerline_log_load(job_number);
         }
 
         // Tick powerline to handle notification expiry
