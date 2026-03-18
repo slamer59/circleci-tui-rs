@@ -1,12 +1,12 @@
-//! Job logs modal widget
+//! Job logs modal widget with collapsible step-based log viewer
 //!
-//! This module provides a modal popup for displaying job logs with syntax highlighting,
-//! scrolling, and interactive controls.
+//! This module provides a modal popup for displaying job logs organized by steps,
+//! with expand/collapse functionality, syntax highlighting, scrolling, and interactive controls.
 
 use crate::api::models::Job;
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BG_DARK, BG_PANEL, BORDER_FOCUSED, FG_BRIGHT,
-    FG_DIM, FG_PRIMARY,
+    get_status_color, get_status_icon, ACCENT, BG_DARK, BG_PANEL, BORDER_FOCUSED, FAILED_TEXT,
+    FG_BRIGHT, FG_DIM, FG_PRIMARY, SUCCESS,
 };
 use ansi_to_tui::IntoText;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -30,13 +30,31 @@ pub enum ModalAction {
     Rerun,
 }
 
-/// Modal popup for displaying job logs
+/// A single step within a job's log output
+pub struct LogStep {
+    /// Name of the step
+    pub name: String,
+    /// Status: "success", "failed", "running", "pending"
+    pub status: String,
+    /// Duration in seconds, if known
+    pub duration_secs: Option<u32>,
+    /// Log lines for this step
+    pub logs: Vec<String>,
+    /// Whether this step is expanded (showing log lines)
+    pub expanded: bool,
+    /// Whether logs for this step are still being fetched
+    pub is_loading: bool,
+}
+
+/// Modal popup for displaying job logs organized by steps
 pub struct LogModal {
     /// The job being displayed
     pub job: Job,
-    /// Log lines to display
-    log_lines: Vec<String>,
-    /// Current scroll offset
+    /// Steps in the job
+    steps: Vec<LogStep>,
+    /// Which step is currently selected
+    selected_step: usize,
+    /// Scroll offset within the entire rendered virtual view
     scroll_offset: usize,
     /// Whether the modal is visible
     visible: bool,
@@ -46,9 +64,9 @@ pub struct LogModal {
     last_fetch: Instant,
     /// Whether to auto-scroll to bottom
     auto_scroll: bool,
-    /// Spinner animation frame (0-7)
+    /// Spinner animation frame (0-9)
     spinner_frame: usize,
-    /// Whether logs are currently loading
+    /// Whether logs are currently loading (initial metadata fetch phase)
     is_loading: bool,
     /// Last rendered visible height (for accurate scroll calculations)
     last_visible_height: usize,
@@ -63,12 +81,13 @@ pub struct LogModal {
 impl LogModal {
     /// Create a new log modal for the given job
     ///
-    /// Initial logs are empty - call `set_logs()` to populate them.
+    /// Initial state is loading - call `set_steps()` or `set_logs()` to populate.
     pub fn new(job: Job) -> Self {
         let is_streaming = job.is_running();
         Self {
             job,
-            log_lines: vec!["Loading logs...".to_string()],
+            steps: Vec::new(),
+            selected_step: 0,
             scroll_offset: 0,
             visible: true,
             is_streaming,
@@ -76,38 +95,95 @@ impl LogModal {
             auto_scroll: is_streaming,
             spinner_frame: 0,
             is_loading: true,
-            last_visible_height: 1, // Will be updated on first render
+            last_visible_height: 1,
             scroll_to_bottom_pending: false,
             load_progress: None,
             created_at: Instant::now(),
         }
     }
 
-    /// Set the log lines to display
-    pub fn set_logs(&mut self, logs: Vec<String>) {
-        let prev_lines = self.log_lines.len();
-        self.log_lines = logs;
-        self.last_fetch = Instant::now();
+    /// Set step metadata. Creates LogStep entries with empty logs and is_loading: true.
+    /// Auto-expands failed steps. Sets is_loading = false (steps are now visible).
+    pub fn set_steps(&mut self, steps: Vec<(String, String)>) {
+        self.steps = steps
+            .into_iter()
+            .map(|(name, status)| {
+                let expanded = status == "failed";
+                LogStep {
+                    name,
+                    status,
+                    duration_secs: None,
+                    logs: Vec::new(),
+                    expanded,
+                    is_loading: true,
+                }
+            })
+            .collect();
         self.is_loading = false;
         self.load_progress = None;
+        // Clamp selected_step
+        if !self.steps.is_empty() && self.selected_step >= self.steps.len() {
+            self.selected_step = self.steps.len() - 1;
+        }
+    }
 
-        // Auto-scroll to bottom if:
-        // 1. This is the initial load (prev_lines was 1 - the "Loading logs..." message)
-        // 2. Auto-scroll is enabled (job is streaming and user hasn't manually scrolled up)
-        if prev_lines <= 1 || self.auto_scroll {
-            // Defer scroll to next render when we know the visible height
-            self.scroll_to_bottom_pending = true;
+    /// Fill in logs for a specific step and mark it as loaded.
+    pub fn set_step_logs(&mut self, step_index: usize, logs: Vec<String>) {
+        if let Some(step) = self.steps.get_mut(step_index) {
+            step.logs = logs;
+            step.is_loading = false;
+        }
+    }
+
+    /// Set the log lines to display (backward compat for cache hit path).
+    /// When called and steps is empty, creates a single "All Logs" step with all lines, expanded.
+    pub fn set_logs(&mut self, logs: Vec<String>) {
+        if self.steps.is_empty() {
+            self.steps = vec![LogStep {
+                name: "All Logs".to_string(),
+                status: "success".to_string(),
+                duration_secs: None,
+                logs,
+                expanded: true,
+                is_loading: false,
+            }];
+            self.selected_step = 0;
+        } else {
+            // If steps already exist, put all logs into the first step
+            if let Some(step) = self.steps.first_mut() {
+                step.logs = logs;
+                step.is_loading = false;
+            }
+        }
+        self.is_loading = false;
+        self.load_progress = None;
+        self.last_fetch = Instant::now();
+
+        // Auto-scroll to bottom on initial load
+        self.scroll_to_bottom_pending = true;
+    }
+
+    /// Append log lines incrementally (for progressive loading).
+    /// Appends to the first step, or creates an "All Logs" step if none exist.
+    /// Mark that all log chunks have been received
+    pub fn mark_loading_complete(&mut self) {
+        self.is_loading = false;
+        self.load_progress = None;
+        self.last_fetch = Instant::now();
+        // Also mark all steps as loaded
+        for step in &mut self.steps {
+            step.is_loading = false;
         }
     }
 
     /// Advance spinner animation frame
-    fn advance_spinner(&mut self) {
+    pub fn advance_spinner(&mut self) {
         const SPINNER_FRAMES_COUNT: usize = 10;
         self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES_COUNT;
     }
 
     /// Get current spinner character
-    fn spinner_char(&self) -> &'static str {
+    pub fn spinner_char(&self) -> &'static str {
         const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         SPINNER_FRAMES[self.spinner_frame % SPINNER_FRAMES.len()]
     }
@@ -123,351 +199,108 @@ impl LogModal {
     }
 
     /// Update loading progress
-    pub fn set_progress(&mut self, current: usize, total: usize, step_name: String) {
-        self.load_progress = Some((current, total, step_name));
-    }
-
     /// Get the job number for this modal
     pub fn job_number(&self) -> u32 {
         self.job.job_number
     }
 
-    /// Render the modal to the frame
-    pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        if !self.visible {
-            return;
-        }
-
-        // Always advance spinner animation on each render for smooth animation
-        // This ensures the spinner animates both during initial load AND during streaming
-        self.advance_spinner();
-
-        // Calculate the centered modal area (80% width, 80% height)
-        let modal_area = centered_rect(80, 80, area);
-
-        // Clear the background with dimming effect
-        f.render_widget(Clear, modal_area);
-
-        // Create the main block
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER_FOCUSED))
-            .style(Style::default().bg(BG_PANEL))
-            .title(format!(" JOB LOGS: {} ", self.job.name))
-            .title_style(Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD));
-
-        let inner_area = block.inner(modal_area);
-        f.render_widget(block, modal_area);
-
-        // Split the inner area into header, logs, and footer
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3), // Header (3 lines with timestamps)
-                Constraint::Min(0),    // Logs (spinner renders here when loading)
-                Constraint::Length(1), // Footer
-            ])
-            .split(inner_area);
-
-        // Render header
-        self.render_header(f, chunks[0]);
-
-        // Render logs or loading spinner in the same area
-        self.render_logs(f, chunks[1]);
-
-        // Render footer - pass the log area height for accurate scroll calculation
-        let log_area_height = chunks[1].height as usize;
-        self.render_footer(f, chunks[2], log_area_height);
+    /// Get a reference to the steps (for caching assembled logs)
+    pub fn steps_ref(&self) -> &[LogStep] {
+        &self.steps
     }
 
-    /// Render the header section with job details
-    fn render_header(&self, f: &mut Frame, area: Rect) {
-        let status_icon = get_status_icon(&self.job.status);
-        let status_color = get_status_color(&self.job.status);
+    // --- Virtual view helpers ---
 
-        // Format timestamps
-        let started_str = if let Some(started) = self.job.started_at {
-            started.format("%Y-%m-%d %H:%M:%S").to_string()
-        } else {
-            "Not started".to_string()
-        };
-
-        let stopped_str = if let Some(stopped) = self.job.stopped_at {
-            stopped.format("%Y-%m-%d %H:%M:%S").to_string()
-        } else {
-            "Still running".to_string()
-        };
-
-        // Build status line with streaming indicator
-        let mut status_line_spans = vec![
-            Span::styled("Status: ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                format!("{} {}", self.job.status.to_uppercase(), status_icon),
-                Style::default()
-                    .fg(status_color)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ];
-
-        // Add streaming indicator if job is running
-        if self.is_streaming {
-            status_line_spans.push(Span::styled("  ", Style::default()));
-            status_line_spans.push(Span::styled(
-                "● Live",
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ));
-        }
-
-        status_line_spans.extend(vec![
-            Span::styled("  │  ", Style::default().fg(FG_DIM)),
-            Span::styled("Duration: ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                self.job.duration_formatted(),
-                Style::default().fg(FG_PRIMARY),
-            ),
-            Span::styled("  │  ", Style::default().fg(FG_DIM)),
-            Span::styled("Executor: ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                &self.job.executor.executor_type,
-                Style::default().fg(FG_PRIMARY),
-            ),
-        ]);
-
-        // Build second line with timestamps and last update
-        let mut time_line_spans = vec![
-            Span::styled("Started: ", Style::default().fg(FG_DIM)),
-            Span::styled(started_str, Style::default().fg(FG_PRIMARY)),
-            Span::styled("  │  ", Style::default().fg(FG_DIM)),
-            Span::styled("Stopped: ", Style::default().fg(FG_DIM)),
-            Span::styled(stopped_str, Style::default().fg(FG_PRIMARY)),
-        ];
-
-        // Add last update time for streaming logs
-        if self.is_streaming {
-            let seconds_ago = self.last_fetch.elapsed().as_secs();
-            time_line_spans.extend(vec![
-                Span::styled("  │  ", Style::default().fg(FG_DIM)),
-                Span::styled("Updated: ", Style::default().fg(FG_DIM)),
-                Span::styled(format!("{}s ago", seconds_ago), Style::default().fg(ACCENT)),
-            ]);
-        }
-
-        let header_text = vec![
-            Line::from(status_line_spans),
-            Line::from(time_line_spans),
-            Line::from(""),
-        ];
-
-        let header = Paragraph::new(header_text).style(Style::default().bg(BG_PANEL));
-
-        f.render_widget(header, area);
-    }
-
-    /// Render the logs section with ANSI color support
-    fn render_logs(&mut self, f: &mut Frame, area: Rect) {
-        // If loading, show sweeping progress bar in the log area
-        if self.is_loading {
-            let spinner = self.spinner_char();
-            let mut lines = Vec::new();
-            let bar_width = (area.width as usize).saturating_sub(6).min(50);
-
-            // Sweeping bar animation (bounces back and forth)
-            let sweep_width = 8.min(bar_width);
-            let cycle_len = bar_width.saturating_sub(sweep_width) + 1;
-            let elapsed_ms = self.created_at.elapsed().as_millis() as usize;
-            let cycle_ms = 1500;
-            let phase = elapsed_ms % (cycle_ms * 2);
-            let t = if phase < cycle_ms {
-                phase
-            } else {
-                cycle_ms * 2 - phase
-            };
-            let pos = if cycle_len > 0 && cycle_ms > 0 {
-                (t * cycle_len.saturating_sub(1)) / cycle_ms
-            } else {
-                0
-            };
-            let before = pos;
-            let after = bar_width.saturating_sub(pos + sweep_width);
-
-            // Message depends on progress phase
-            let message = if let Some((_, _, ref step_name)) = self.load_progress {
-                format!("Fetching: {}", step_name)
-            } else {
-                "Loading logs...".to_string()
-            };
-
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{} ", spinner),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(&message, Style::default().fg(FG_PRIMARY)),
-            ]));
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled(" [", Style::default().fg(FG_DIM)),
-                Span::styled("─".repeat(before), Style::default().fg(FG_DIM)),
-                Span::styled("━".repeat(sweep_width), Style::default().fg(ACCENT)),
-                Span::styled("─".repeat(after), Style::default().fg(FG_DIM)),
-                Span::styled("]", Style::default().fg(FG_DIM)),
-            ]));
-
-            let loading = Paragraph::new(lines).style(Style::default().bg(BG_DARK).fg(FG_PRIMARY));
-
-            f.render_widget(loading, area);
-            return;
-        }
-
-        let visible_height = area.height as usize;
-
-        // Update last visible height for scroll calculations
-        self.last_visible_height = visible_height;
-
-        // If scroll to bottom is pending, do it now that we know the visible height
-        if self.scroll_to_bottom_pending {
-            let max_scroll = self.log_lines.len().saturating_sub(visible_height);
-            self.scroll_offset = max_scroll;
-            self.scroll_to_bottom_pending = false;
-        }
-
-        // Get all log lines (no filtering needed since loading is handled above)
-        let display_lines: Vec<&String> = self.log_lines.iter().collect();
-
-        let max_scroll = display_lines.len().saturating_sub(visible_height);
-        let scroll_offset = self.scroll_offset.min(max_scroll);
-
-        // Get available width for truncation (area width)
-        let max_width = area.width as usize;
-
-        // Get the visible log lines with ANSI parsing and truncation
-        let visible_lines: Vec<Line> = display_lines
-            .iter()
-            .skip(scroll_offset)
-            .take(visible_height)
-            .map(|line| {
-                // Truncate line to fit within the available width
-                // Use char-based truncation to avoid splitting multi-byte UTF-8 characters
-                let truncated = if line.chars().count() > max_width {
-                    let truncated_str: String =
-                        line.chars().take(max_width.saturating_sub(1)).collect();
-                    format!("{}…", truncated_str)
+    /// Total number of rows in the virtual view (step headers + expanded log lines)
+    fn total_virtual_rows(&self) -> usize {
+        let mut total = 0;
+        for step in &self.steps {
+            total += 1; // step header row
+            if step.expanded {
+                if step.is_loading {
+                    total += 1; // loading indicator row
                 } else {
-                    line.to_string()
-                };
-
-                // Parse ANSI codes and convert to Ratatui styled text
-                match truncated.as_str().into_text() {
-                    Ok(text) => {
-                        // Convert ansi-to-tui Line to ratatui Line
-                        if text.lines.is_empty() {
-                            Line::from(truncated)
-                        } else {
-                            // Extract spans from ansi-to-tui Line and create ratatui Line
-                            let ansi_line = &text.lines[0];
-                            let spans: Vec<Span> = ansi_line
-                                .spans
-                                .iter()
-                                .map(|ansi_span| {
-                                    // Build ratatui Style from ansi-to-tui style components
-                                    let mut style = Style::default();
-
-                                    // Convert foreground color if present
-                                    if let Some(fg) = ansi_span.style.fg {
-                                        style = style.fg(Self::convert_color(fg));
-                                    }
-
-                                    // Convert background color if present
-                                    if let Some(bg) = ansi_span.style.bg {
-                                        style = style.bg(Self::convert_color(bg));
-                                    }
-
-                                    // Convert modifiers
-                                    style = style.add_modifier(Self::convert_modifier(
-                                        ansi_span.style.add_modifier,
-                                    ));
-                                    style = style.remove_modifier(Self::convert_modifier(
-                                        ansi_span.style.sub_modifier,
-                                    ));
-
-                                    Span::styled(ansi_span.content.to_string(), style)
-                                })
-                                .collect();
-                            Line::from(spans)
-                        }
-                    }
-                    Err(_) => {
-                        // Fallback to plain text if ANSI parsing fails
-                        Line::from(truncated)
-                    }
+                    total += step.logs.len().max(1); // at least 1 row for empty logs
                 }
-            })
-            .collect();
-
-        let logs = Paragraph::new(visible_lines)
-            .style(Style::default().bg(BG_DARK).fg(FG_PRIMARY))
-            .scroll((0, 0)); // Disable automatic scrolling
-
-        f.render_widget(logs, area);
+            }
+        }
+        total
     }
 
-    /// Render the footer with keybindings and scroll indicator
-    fn render_footer(&self, f: &mut Frame, area: Rect, log_area_height: usize) {
-        let total_lines = self.log_lines.len();
-        let visible_height = log_area_height;
-        let max_scroll = total_lines.saturating_sub(visible_height);
-        let current_scroll = self.scroll_offset.min(max_scroll);
+    /// Get the virtual row index of a given step's header
+    fn step_header_row(&self, step_index: usize) -> usize {
+        let mut row = 0;
+        for (i, step) in self.steps.iter().enumerate() {
+            if i == step_index {
+                return row;
+            }
+            row += 1;
+            if step.expanded {
+                if step.is_loading {
+                    row += 1;
+                } else {
+                    row += step.logs.len().max(1);
+                }
+            }
+        }
+        row
+    }
 
-        // Calculate first and last visible line numbers (1-indexed for display)
-        let first_line = current_scroll + 1;
-        let last_line = (current_scroll + visible_height).min(total_lines);
+    /// Check if any step is currently expanded
+    fn any_step_expanded(&self) -> bool {
+        self.steps.iter().any(|s| s.expanded)
+    }
 
-        // Calculate scroll percentage
-        // At bottom: scroll_offset >= max_scroll → 100%
-        // At top: scroll_offset = 0 → depends on how much is visible
-        let scroll_percent = if total_lines <= visible_height {
-            // All content fits on screen
-            100
-        } else if current_scroll >= max_scroll {
-            // At the bottom
-            100
-        } else if current_scroll == 0 {
-            // At the top
-            0
+    /// Format duration_secs into a human-readable string
+    fn format_duration(secs: u32) -> String {
+        if secs >= 60 {
+            format!("{}m {}s", secs / 60, secs % 60)
         } else {
-            // In between: calculate based on scroll position
-            ((current_scroll as f32 / max_scroll as f32) * 100.0) as u16
+            format!("{}s", secs)
+        }
+    }
+
+    // --- ANSI parsing helpers ---
+
+    /// Parse a single log line with ANSI codes into a ratatui Line, truncated to max_width
+    fn parse_ansi_line(line: &str, max_width: usize) -> Line<'static> {
+        let truncated = if line.chars().count() > max_width {
+            let truncated_str: String = line.chars().take(max_width.saturating_sub(1)).collect();
+            format!("{}…", truncated_str)
+        } else {
+            line.to_string()
         };
 
-        let footer_text = vec![Line::from(vec![
-            Span::styled(
-                "[Esc]",
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Close  ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                "[↑↓⇞⇟]",
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Scroll  ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                "[r]",
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Rerun  ", Style::default().fg(FG_DIM)),
-            Span::styled("│ ", Style::default().fg(FG_DIM)),
-            Span::styled(
-                format!(
-                    "Lines {}-{}/{} ({}%)",
-                    first_line, last_line, total_lines, scroll_percent
-                ),
-                Style::default().fg(ACCENT),
-            ),
-        ])];
-
-        let footer = Paragraph::new(footer_text).style(Style::default().bg(BG_PANEL));
-
-        f.render_widget(footer, area);
+        match truncated.as_str().into_text() {
+            Ok(text) => {
+                if text.lines.is_empty() {
+                    Line::from(truncated)
+                } else {
+                    let ansi_line = &text.lines[0];
+                    let spans: Vec<Span> = ansi_line
+                        .spans
+                        .iter()
+                        .map(|ansi_span| {
+                            let mut style = Style::default();
+                            if let Some(fg) = ansi_span.style.fg {
+                                style = style.fg(Self::convert_color(fg));
+                            }
+                            if let Some(bg) = ansi_span.style.bg {
+                                style = style.bg(Self::convert_color(bg));
+                            }
+                            style = style
+                                .add_modifier(Self::convert_modifier(ansi_span.style.add_modifier));
+                            style = style.remove_modifier(Self::convert_modifier(
+                                ansi_span.style.sub_modifier,
+                            ));
+                            Span::styled(ansi_span.content.to_string(), style)
+                        })
+                        .collect();
+                    Line::from(spans)
+                }
+            }
+            Err(_) => Line::from(truncated),
+        }
     }
 
     /// Convert ratatui-core Color to ratatui Color
@@ -534,32 +367,459 @@ impl LogModal {
         result
     }
 
+    // --- Rendering ---
+
+    /// Render the modal to the frame
+    pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        if !self.visible {
+            return;
+        }
+
+        // Always advance spinner animation on each render for smooth animation
+        self.advance_spinner();
+
+        let modal_area = centered_rect(80, 80, area);
+
+        // Clear the background
+        f.render_widget(Clear, modal_area);
+
+        // Create the main block
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(BORDER_FOCUSED))
+            .style(Style::default().bg(BG_PANEL))
+            .title(format!(" JOB LOGS: {} ", self.job.name))
+            .title_style(Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD));
+
+        let inner_area = block.inner(modal_area);
+        f.render_widget(block, modal_area);
+
+        // Split into header, steps/logs, and footer
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Steps/Logs
+                Constraint::Length(1), // Footer
+            ])
+            .split(inner_area);
+
+        self.render_header(f, chunks[0]);
+        self.render_steps(f, chunks[1]);
+
+        let log_area_height = chunks[1].height as usize;
+        self.render_footer(f, chunks[2], log_area_height);
+    }
+
+    /// Render the header section with job details
+    fn render_header(&self, f: &mut Frame, area: Rect) {
+        let status_icon = get_status_icon(&self.job.status);
+        let status_color = get_status_color(&self.job.status);
+
+        let started_str = if let Some(started) = self.job.started_at {
+            started.format("%Y-%m-%d %H:%M:%S").to_string()
+        } else {
+            "Not started".to_string()
+        };
+
+        let stopped_str = if let Some(stopped) = self.job.stopped_at {
+            stopped.format("%Y-%m-%d %H:%M:%S").to_string()
+        } else {
+            "Still running".to_string()
+        };
+
+        let mut status_line_spans = vec![
+            Span::styled("Status: ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                format!("{} {}", self.job.status.to_uppercase(), status_icon),
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+
+        if self.is_streaming {
+            status_line_spans.push(Span::styled("  ", Style::default()));
+            status_line_spans.push(Span::styled(
+                "● Live",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        status_line_spans.extend(vec![
+            Span::styled("  │  ", Style::default().fg(FG_DIM)),
+            Span::styled("Duration: ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                self.job.duration_formatted(),
+                Style::default().fg(FG_PRIMARY),
+            ),
+            Span::styled("  │  ", Style::default().fg(FG_DIM)),
+            Span::styled("Executor: ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                &self.job.executor.executor_type,
+                Style::default().fg(FG_PRIMARY),
+            ),
+        ]);
+
+        let mut time_line_spans = vec![
+            Span::styled("Started: ", Style::default().fg(FG_DIM)),
+            Span::styled(started_str, Style::default().fg(FG_PRIMARY)),
+            Span::styled("  │  ", Style::default().fg(FG_DIM)),
+            Span::styled("Stopped: ", Style::default().fg(FG_DIM)),
+            Span::styled(stopped_str, Style::default().fg(FG_PRIMARY)),
+        ];
+
+        if self.is_streaming {
+            let seconds_ago = self.last_fetch.elapsed().as_secs();
+            time_line_spans.extend(vec![
+                Span::styled("  │  ", Style::default().fg(FG_DIM)),
+                Span::styled("Updated: ", Style::default().fg(FG_DIM)),
+                Span::styled(format!("{}s ago", seconds_ago), Style::default().fg(ACCENT)),
+            ]);
+        }
+
+        let header_text = vec![
+            Line::from(status_line_spans),
+            Line::from(time_line_spans),
+            Line::from(""),
+        ];
+
+        let header = Paragraph::new(header_text).style(Style::default().bg(BG_PANEL));
+        f.render_widget(header, area);
+    }
+
+    /// Render the step-based log view (replaces render_logs)
+    fn render_steps(&mut self, f: &mut Frame, area: Rect) {
+        // If loading (before steps discovered), show sweeping progress bar
+        if self.is_loading {
+            self.render_loading_bar(f, area);
+            return;
+        }
+
+        // If no steps at all, show empty message
+        if self.steps.is_empty() {
+            let empty = Paragraph::new("No log steps available.")
+                .style(Style::default().bg(BG_DARK).fg(FG_DIM));
+            f.render_widget(empty, area);
+            return;
+        }
+
+        let visible_height = area.height as usize;
+        self.last_visible_height = visible_height;
+
+        let total_rows = self.total_virtual_rows();
+
+        // Handle scroll_to_bottom_pending
+        if self.scroll_to_bottom_pending {
+            let max_scroll = total_rows.saturating_sub(visible_height);
+            self.scroll_offset = max_scroll;
+            self.scroll_to_bottom_pending = false;
+        }
+
+        let max_scroll = total_rows.saturating_sub(visible_height);
+        let scroll_offset = self.scroll_offset.min(max_scroll);
+        self.scroll_offset = scroll_offset;
+
+        let max_width = area.width as usize;
+
+        // Build all virtual rows, then slice the visible window
+        let mut all_lines: Vec<Line> = Vec::with_capacity(total_rows);
+
+        for (step_idx, step) in self.steps.iter().enumerate() {
+            // Build step header line
+            let is_selected = step_idx == self.selected_step;
+            let arrow = if step.expanded { "▼" } else { "▶" };
+
+            // Status icon
+            let (status_icon, icon_style) = match step.status.as_str() {
+                "success" => (
+                    "✓",
+                    Style::default().fg(SUCCESS).add_modifier(Modifier::BOLD),
+                ),
+                "failed" => (
+                    "✗",
+                    Style::default()
+                        .fg(FAILED_TEXT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                "running" => (
+                    self.spinner_char(),
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                _ => ("○", Style::default().fg(FG_DIM)),
+            };
+
+            // Duration string
+            let duration_str = if let Some(secs) = step.duration_secs {
+                Self::format_duration(secs)
+            } else if step.status == "running" {
+                "...".to_string()
+            } else {
+                String::new()
+            };
+
+            // Calculate how much space the name can take
+            // Format: "  ▶ ✓ StepName                          22s"
+            let prefix_len = 6; // "  ▶ ✓ "
+            let duration_display_len = if duration_str.is_empty() {
+                0
+            } else {
+                duration_str.len() + 2 // "  " padding before duration
+            };
+            let name_max_width = max_width
+                .saturating_sub(prefix_len)
+                .saturating_sub(duration_display_len);
+            let display_name: String = if step.name.chars().count() > name_max_width {
+                let truncated: String = step
+                    .name
+                    .chars()
+                    .take(name_max_width.saturating_sub(1))
+                    .collect();
+                format!("{}…", truncated)
+            } else {
+                step.name.clone()
+            };
+
+            // Pad name to fill available space for right-aligned duration
+            let name_display_len = display_name.chars().count();
+            let padding = name_max_width.saturating_sub(name_display_len);
+            let padded_name = format!("{}{}", display_name, " ".repeat(padding));
+
+            let bg_style = if is_selected {
+                Style::default().bg(ACCENT).fg(BG_DARK)
+            } else {
+                Style::default().bg(BG_DARK)
+            };
+
+            let mut spans = vec![
+                Span::styled("  ", bg_style),
+                Span::styled(
+                    arrow,
+                    if is_selected {
+                        bg_style.add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(FG_DIM).bg(BG_DARK)
+                    },
+                ),
+                Span::styled(" ", bg_style),
+                Span::styled(
+                    status_icon,
+                    if is_selected {
+                        bg_style.add_modifier(Modifier::BOLD)
+                    } else {
+                        icon_style.bg(BG_DARK)
+                    },
+                ),
+                Span::styled(" ", bg_style),
+                Span::styled(
+                    padded_name,
+                    if is_selected {
+                        bg_style.add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(FG_BRIGHT).bg(BG_DARK)
+                    },
+                ),
+            ];
+
+            if !duration_str.is_empty() {
+                spans.push(Span::styled(
+                    format!("  {}", duration_str),
+                    if is_selected {
+                        bg_style
+                    } else {
+                        Style::default().fg(FG_DIM).bg(BG_DARK)
+                    },
+                ));
+            }
+
+            all_lines.push(Line::from(spans));
+
+            // If expanded, add log lines or loading indicator
+            if step.expanded {
+                if step.is_loading {
+                    let spinner = self.spinner_char();
+                    all_lines.push(Line::from(vec![
+                        Span::styled("  │ ", Style::default().fg(FG_DIM)),
+                        Span::styled(
+                            format!("{} Loading...", spinner),
+                            Style::default().fg(ACCENT),
+                        ),
+                    ]));
+                } else if step.logs.is_empty() {
+                    all_lines.push(Line::from(vec![
+                        Span::styled("  │ ", Style::default().fg(FG_DIM)),
+                        Span::styled("(no output)", Style::default().fg(FG_DIM)),
+                    ]));
+                } else {
+                    for log_line in &step.logs {
+                        let prefix_span = Span::styled("  │ ", Style::default().fg(FG_DIM));
+                        let content_max = max_width.saturating_sub(4); // 4 chars for "  │ "
+                        let parsed = Self::parse_ansi_line(log_line, content_max);
+                        let mut spans = vec![prefix_span];
+                        spans.extend(parsed.spans);
+                        all_lines.push(Line::from(spans));
+                    }
+                }
+            }
+        }
+
+        // Slice visible window
+        let visible_lines: Vec<Line> = all_lines
+            .into_iter()
+            .skip(scroll_offset)
+            .take(visible_height)
+            .collect();
+
+        let logs = Paragraph::new(visible_lines).style(Style::default().bg(BG_DARK).fg(FG_PRIMARY));
+
+        f.render_widget(logs, area);
+    }
+
+    /// Render the sweeping progress bar (used during initial loading)
+    fn render_loading_bar(&self, f: &mut Frame, area: Rect) {
+        let spinner = self.spinner_char();
+        let mut lines = Vec::new();
+        let bar_width = (area.width as usize).saturating_sub(6).min(50);
+
+        let sweep_width = 8.min(bar_width);
+        let cycle_len = bar_width.saturating_sub(sweep_width) + 1;
+        let elapsed_ms = self.created_at.elapsed().as_millis() as usize;
+        let cycle_ms = 1500;
+        let phase = elapsed_ms % (cycle_ms * 2);
+        let t = if phase < cycle_ms {
+            phase
+        } else {
+            cycle_ms * 2 - phase
+        };
+        let pos = if cycle_len > 0 && cycle_ms > 0 {
+            (t * cycle_len.saturating_sub(1)) / cycle_ms
+        } else {
+            0
+        };
+        let before = pos;
+        let after = bar_width.saturating_sub(pos + sweep_width);
+
+        let message = if let Some((_, _, ref step_name)) = self.load_progress {
+            format!("Fetching: {}", step_name)
+        } else {
+            "Loading logs...".to_string()
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(&message, Style::default().fg(FG_PRIMARY)),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled(" [", Style::default().fg(FG_DIM)),
+            Span::styled("─".repeat(before), Style::default().fg(FG_DIM)),
+            Span::styled("━".repeat(sweep_width), Style::default().fg(ACCENT)),
+            Span::styled("─".repeat(after), Style::default().fg(FG_DIM)),
+            Span::styled("]", Style::default().fg(FG_DIM)),
+        ]));
+
+        let loading = Paragraph::new(lines).style(Style::default().bg(BG_DARK).fg(FG_PRIMARY));
+        f.render_widget(loading, area);
+    }
+
+    /// Render the footer with keybindings and step indicator
+    fn render_footer(&self, f: &mut Frame, area: Rect, _log_area_height: usize) {
+        let step_count = self.steps.len();
+        let step_num = if step_count > 0 {
+            self.selected_step + 1
+        } else {
+            0
+        };
+
+        let has_expanded = self.any_step_expanded();
+        let selected_expanded = self
+            .steps
+            .get(self.selected_step)
+            .is_some_and(|s| s.expanded);
+
+        let enter_label = if selected_expanded {
+            " Collapse  "
+        } else {
+            " Expand  "
+        };
+
+        let arrow_label = if has_expanded {
+            " Scroll  "
+        } else {
+            " Steps  "
+        };
+
+        let footer_text = vec![Line::from(vec![
+            Span::styled(
+                "[Esc]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Close  ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                "[Enter]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(enter_label, Style::default().fg(FG_DIM)),
+            Span::styled(
+                "[↑↓]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(arrow_label, Style::default().fg(FG_DIM)),
+            Span::styled(
+                "[r]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Rerun  ", Style::default().fg(FG_DIM)),
+            Span::styled("│  ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                format!("Step {}/{}", step_num, step_count),
+                Style::default().fg(ACCENT),
+            ),
+        ])];
+
+        let footer = Paragraph::new(footer_text).style(Style::default().bg(BG_PANEL));
+        f.render_widget(footer, area);
+    }
+
+    // --- Input handling ---
+
     /// Handle keyboard input
     pub fn handle_input(&mut self, key: KeyEvent) -> ModalAction {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => ModalAction::Close,
             KeyCode::Char('r') => ModalAction::Rerun,
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                self.toggle_selected_step();
+                ModalAction::None
+            }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.scroll_up();
-                // Disable auto-scroll when user manually scrolls up
+                if self.any_step_expanded() {
+                    self.scroll_up();
+                } else {
+                    self.move_selected_step_up();
+                }
                 self.auto_scroll = false;
                 ModalAction::None
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.scroll_down();
+                if self.any_step_expanded() {
+                    self.scroll_down();
+                } else {
+                    self.move_selected_step_down();
+                }
                 ModalAction::None
             }
             KeyCode::PageUp => {
-                // Scroll up by 10 lines
                 for _ in 0..10 {
                     self.scroll_up();
                 }
-                // Disable auto-scroll when user manually scrolls up
                 self.auto_scroll = false;
                 ModalAction::None
             }
             KeyCode::PageDown => {
-                // Scroll down by 10 lines
                 for _ in 0..10 {
                     self.scroll_down();
                 }
@@ -567,18 +827,13 @@ impl LogModal {
             }
             KeyCode::Home => {
                 self.scroll_offset = 0;
-                // Disable auto-scroll when user manually scrolls
                 self.auto_scroll = false;
                 ModalAction::None
             }
             KeyCode::End => {
-                // Scroll to bottom using proper max scroll
-                let max_scroll = self
-                    .log_lines
-                    .len()
-                    .saturating_sub(self.last_visible_height);
+                let total = self.total_virtual_rows();
+                let max_scroll = total.saturating_sub(self.last_visible_height);
                 self.scroll_offset = max_scroll;
-                // Re-enable auto-scroll when user scrolls to end
                 if self.is_streaming {
                     self.auto_scroll = true;
                 }
@@ -588,20 +843,57 @@ impl LogModal {
         }
     }
 
-    /// Scroll up by one line
+    /// Toggle expand/collapse on the selected step
+    fn toggle_selected_step(&mut self) {
+        if let Some(step) = self.steps.get_mut(self.selected_step) {
+            step.expanded = !step.expanded;
+            if step.expanded {
+                // Adjust scroll_offset to show the step header at the top
+                let header_row = self.step_header_row(self.selected_step);
+                self.scroll_offset = header_row;
+            }
+        }
+    }
+
+    /// Move selected step up
+    fn move_selected_step_up(&mut self) {
+        if self.selected_step > 0 {
+            self.selected_step -= 1;
+            self.ensure_selected_visible();
+        }
+    }
+
+    /// Move selected step down
+    fn move_selected_step_down(&mut self) {
+        if !self.steps.is_empty() && self.selected_step < self.steps.len() - 1 {
+            self.selected_step += 1;
+            self.ensure_selected_visible();
+        }
+    }
+
+    /// Ensure the selected step header is visible in the viewport
+    fn ensure_selected_visible(&mut self) {
+        let header_row = self.step_header_row(self.selected_step);
+        let visible_height = self.last_visible_height;
+
+        if header_row < self.scroll_offset {
+            self.scroll_offset = header_row;
+        } else if header_row >= self.scroll_offset + visible_height {
+            self.scroll_offset = header_row.saturating_sub(visible_height - 1);
+        }
+    }
+
+    /// Scroll up by one line in the virtual view
     pub fn scroll_up(&mut self) {
         if self.scroll_offset > 0 {
             self.scroll_offset -= 1;
         }
     }
 
-    /// Scroll down by one line
+    /// Scroll down by one line in the virtual view
     pub fn scroll_down(&mut self) {
-        // Use last_visible_height for accurate max scroll calculation
-        let max_scroll = self
-            .log_lines
-            .len()
-            .saturating_sub(self.last_visible_height);
+        let total = self.total_virtual_rows();
+        let max_scroll = total.saturating_sub(self.last_visible_height);
         if self.scroll_offset < max_scroll {
             self.scroll_offset += 1;
         }
@@ -668,7 +960,8 @@ mod tests {
         let modal = LogModal::new(job);
         assert!(modal.visible);
         assert_eq!(modal.scroll_offset, 0);
-        assert!(!modal.log_lines.is_empty());
+        assert!(modal.steps.is_empty());
+        assert!(modal.is_loading);
     }
 
     #[test]
@@ -690,26 +983,35 @@ mod tests {
         let job = create_test_job();
         let mut modal = LogModal::new(job);
 
-        // Add some logs to enable scrolling
-        modal.set_logs(vec![
-            "Line 1".to_string(),
-            "Line 2".to_string(),
-            "Line 3".to_string(),
-            "Line 4".to_string(),
-            "Line 5".to_string(),
+        // Set up steps
+        modal.set_steps(vec![
+            ("Step 1".to_string(), "success".to_string()),
+            ("Step 2".to_string(), "failed".to_string()),
+            ("Step 3".to_string(), "success".to_string()),
         ]);
 
-        // set_logs auto-scrolls to bottom, so start from top
+        // Step 2 should be auto-expanded (failed)
+        assert!(!modal.steps[0].expanded);
+        assert!(modal.steps[1].expanded);
+        assert!(!modal.steps[2].expanded);
+
+        // Set logs for expanded step
+        modal.set_step_logs(
+            1,
+            vec![
+                "Error line 1".to_string(),
+                "Error line 2".to_string(),
+                "Error line 3".to_string(),
+            ],
+        );
+
+        // A step is expanded, so up/down scrolls
         modal.scroll_offset = 0;
-        let initial_offset = modal.scroll_offset;
-
-        // Scroll down
         modal.scroll_down();
-        assert!(modal.scroll_offset > initial_offset);
+        assert!(modal.scroll_offset > 0);
 
-        // Scroll up
         modal.scroll_up();
-        assert_eq!(modal.scroll_offset, initial_offset);
+        assert_eq!(modal.scroll_offset, 0);
 
         // Can't scroll above 0
         modal.scroll_up();
@@ -717,11 +1019,73 @@ mod tests {
     }
 
     #[test]
+    fn test_set_logs_backward_compat() {
+        let job = create_test_job();
+        let mut modal = LogModal::new(job);
+
+        // set_logs should create a single "All Logs" step
+        modal.set_logs(vec![
+            "Line 1".to_string(),
+            "Line 2".to_string(),
+            "Line 3".to_string(),
+        ]);
+
+        assert_eq!(modal.steps.len(), 1);
+        assert_eq!(modal.steps[0].name, "All Logs");
+        assert!(modal.steps[0].expanded);
+        assert_eq!(modal.steps[0].logs.len(), 3);
+        assert!(!modal.is_loading);
+    }
+
+    #[test]
+    fn test_step_expand_collapse() {
+        let job = create_test_job();
+        let mut modal = LogModal::new(job);
+
+        modal.set_steps(vec![
+            ("Step 1".to_string(), "success".to_string()),
+            ("Step 2".to_string(), "success".to_string()),
+        ]);
+
+        assert!(!modal.steps[0].expanded);
+        assert!(!modal.steps[1].expanded);
+
+        // Toggle expand on selected step (step 0)
+        modal.toggle_selected_step();
+        assert!(modal.steps[0].expanded);
+
+        // Toggle collapse
+        modal.toggle_selected_step();
+        assert!(!modal.steps[0].expanded);
+    }
+
+    #[test]
+    fn test_total_virtual_rows() {
+        let job = create_test_job();
+        let mut modal = LogModal::new(job);
+
+        modal.set_steps(vec![
+            ("Step 1".to_string(), "success".to_string()),
+            ("Step 2".to_string(), "failed".to_string()),
+        ]);
+
+        // Step 2 is auto-expanded (failed), step 1 is collapsed
+        // Step 1: 1 header row
+        // Step 2: 1 header row + 1 loading row (is_loading: true)
+        assert_eq!(modal.total_virtual_rows(), 3);
+
+        // Set logs for step 2
+        modal.set_step_logs(1, vec!["line1".to_string(), "line2".to_string()]);
+        // Step 1: 1 header
+        // Step 2: 1 header + 2 log lines
+        assert_eq!(modal.total_virtual_rows(), 4);
+    }
+
+    #[test]
     fn test_centered_rect() {
         let parent = Rect::new(0, 0, 100, 100);
         let centered = centered_rect(80, 80, parent);
 
-        // Should be centered with 80% width and height
         assert_eq!(centered.width, 80);
         assert_eq!(centered.height, 80);
         assert_eq!(centered.x, 10);

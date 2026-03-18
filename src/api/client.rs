@@ -116,6 +116,18 @@ struct JobItem {
     executor_type: Option<String>,
 }
 
+/// Messages sent during step-based log streaming
+#[derive(Debug)]
+pub enum StepStreamMessage {
+    /// Step metadata discovered - (name, status) pairs for all steps
+    StepsDiscovered(Vec<(String, String)>),
+    /// Logs fetched for a specific step
+    StepLogsFetched {
+        step_index: usize,
+        logs: Vec<String>,
+    },
+}
+
 impl CircleCIClient {
     /// Get current user information
     ///
@@ -656,6 +668,83 @@ impl CircleCIClient {
             }
         }
         Ok(all_logs)
+    }
+
+    /// Fetch job steps metadata, then stream per-step logs via channels.
+    ///
+    /// Sends:
+    /// 1. `StepDiscovered` messages with step metadata (name, status) for each step
+    /// 2. `StepLogsFetched` messages with logs for each step that has an output_url
+    /// 3. Returns Ok(()) when complete
+    ///
+    /// This allows the UI to show the step list immediately while logs load progressively.
+    pub async fn stream_job_steps_and_logs(
+        &self,
+        job_number: u32,
+        step_tx: tokio::sync::mpsc::UnboundedSender<StepStreamMessage>,
+    ) -> Result<(), ApiError> {
+        let steps = self.get_job_steps(job_number).await?;
+
+        // First, send all step metadata so UI can show the step list immediately
+        let step_infos: Vec<(String, String)> = steps
+            .iter()
+            .map(|s| (s.name.clone(), s.status.clone()))
+            .collect();
+        let _ = step_tx.send(StepStreamMessage::StepsDiscovered(step_infos));
+
+        // Check if any action has logs
+        let has_any_logs = steps
+            .iter()
+            .flat_map(|s| &s.actions)
+            .any(|a| a.output_url.is_some());
+
+        if !has_any_logs {
+            // No logs available yet - send empty logs for all steps
+            for (idx, _) in steps.iter().enumerate() {
+                let _ = step_tx.send(StepStreamMessage::StepLogsFetched {
+                    step_index: idx,
+                    logs: vec!["No logs available yet.".to_string()],
+                });
+            }
+            return Ok(());
+        }
+
+        // Then fetch logs for each step's actions
+        for (step_idx, step) in steps.iter().enumerate() {
+            let mut step_logs = Vec::new();
+
+            for action in &step.actions {
+                if let Some(output_url) = &action.output_url {
+                    match self.fetch_log_output(output_url).await {
+                        Ok(lines) => {
+                            // If step has multiple actions, add action name as header
+                            if step.actions.len() > 1 {
+                                step_logs.push(action.name.clone());
+                            }
+                            for line in lines {
+                                if !line.is_empty() {
+                                    step_logs.push(line);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            step_logs.push(format!("[Error fetching logs: {}]", e));
+                        }
+                    }
+                } else if action.status == "running" {
+                    step_logs.push("[Waiting for output...]".to_string());
+                } else if action.status == "pending" {
+                    step_logs.push("[Pending...]".to_string());
+                }
+            }
+
+            let _ = step_tx.send(StepStreamMessage::StepLogsFetched {
+                step_index: step_idx,
+                logs: step_logs,
+            });
+        }
+
+        Ok(())
     }
 }
 

@@ -3,7 +3,7 @@
 //! This module contains the main App struct that manages the application state,
 //! handles events, and coordinates between different screens.
 
-use crate::api::client::CircleCIClient;
+use crate::api::client::{CircleCIClient, StepStreamMessage};
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::cache::{LogCacheManager, PrefetchCoordinator};
 use crate::config::Config;
@@ -24,9 +24,18 @@ use tokio::sync::mpsc;
 
 /// Results from background API tasks
 pub enum BgTaskResult {
-    LogsLoaded {
-        job_number: u32,
+    /// Step metadata discovered - show step list immediately
+    LogStepsDiscovered {
+        steps: Vec<(String, String)>,
+    },
+    /// Logs fetched for a specific step
+    LogStepFetched {
+        step_index: usize,
         logs: Vec<String>,
+    },
+    /// All step logs fetched - cache and mark complete
+    LogsComplete {
+        job_number: u32,
         job_status: Option<String>,
     },
     LogsError(anyhow::Error),
@@ -48,12 +57,6 @@ pub enum BgTaskResult {
         job_status: Option<String>,
     },
     PowerlineLogsError(anyhow::Error),
-    /// Progress update for log loading
-    LogProgress {
-        current: usize,
-        total: usize,
-        step_name: String,
-    },
 }
 
 /// Application screens
@@ -727,36 +730,35 @@ impl App {
             return;
         }
 
-        // Cache miss - get job status for caching later
+        // Cache miss - use step-based streaming
         let job_status = self.log_modal.as_ref().map(|m| m.job.status.clone());
 
         let client = Arc::clone(&self.api_client);
         let tx = self.bg_sender.clone();
-        let progress_tx = tx.clone();
 
-        // Create a progress channel to forward step progress to the UI
-        let (step_tx, mut step_rx) = mpsc::unbounded_channel::<(usize, usize, String)>();
+        // Create a channel for step stream messages
+        let (step_tx, mut step_rx) = mpsc::unbounded_channel::<StepStreamMessage>();
 
-        // Forward progress updates to the main bg channel
+        // Forward step stream messages to the main bg channel
+        let forward_tx = tx.clone();
         tokio::spawn(async move {
-            while let Some((current, total, step_name)) = step_rx.recv().await {
-                let _ = progress_tx.send(BgTaskResult::LogProgress {
-                    current,
-                    total,
-                    step_name,
-                });
+            while let Some(msg) = step_rx.recv().await {
+                match msg {
+                    StepStreamMessage::StepsDiscovered(steps) => {
+                        let _ = forward_tx.send(BgTaskResult::LogStepsDiscovered { steps });
+                    }
+                    StepStreamMessage::StepLogsFetched { step_index, logs } => {
+                        let _ = forward_tx.send(BgTaskResult::LogStepFetched { step_index, logs });
+                    }
+                }
             }
         });
 
         tokio::spawn(async move {
-            match client
-                .stream_job_log_with_progress(job_number, Some(step_tx))
-                .await
-            {
-                Ok(logs) => {
-                    let _ = tx.send(BgTaskResult::LogsLoaded {
+            match client.stream_job_steps_and_logs(job_number, step_tx).await {
+                Ok(()) => {
+                    let _ = tx.send(BgTaskResult::LogsComplete {
                         job_number,
-                        logs,
                         job_status,
                     });
                 }
@@ -874,23 +876,47 @@ impl App {
     pub fn process_bg_results(&mut self) {
         while let Ok(result) = self.bg_receiver.try_recv() {
             match result {
-                BgTaskResult::LogsLoaded {
+                BgTaskResult::LogStepsDiscovered { steps } => {
+                    if let Some(modal) = &mut self.log_modal {
+                        modal.set_steps(steps);
+                    }
+                }
+                BgTaskResult::LogStepFetched { step_index, logs } => {
+                    if let Some(modal) = &mut self.log_modal {
+                        modal.set_step_logs(step_index, logs);
+                    }
+                }
+                BgTaskResult::LogsComplete {
                     job_number,
-                    logs,
                     job_status,
                 } => {
-                    // Cache the result if job is completed
+                    // Assemble flat logs from all steps for caching
                     if let Some(status) = &job_status {
                         if status != "running" {
-                            let _ = self.log_cache_manager.put(
-                                job_number,
-                                logs.clone(),
-                                status.clone(),
-                            );
+                            if let Some(modal) = &self.log_modal {
+                                let mut all_logs = Vec::new();
+                                for (i, step) in modal.steps_ref().iter().enumerate() {
+                                    if i > 0 {
+                                        all_logs.push(String::new());
+                                    }
+                                    all_logs.push(step.name.clone());
+                                    for line in &step.logs {
+                                        if !line.is_empty() {
+                                            all_logs.push(line.clone());
+                                        }
+                                    }
+                                    all_logs.push(String::new());
+                                }
+                                let _ = self.log_cache_manager.put(
+                                    job_number,
+                                    all_logs,
+                                    status.clone(),
+                                );
+                            }
                         }
                     }
                     if let Some(modal) = &mut self.log_modal {
-                        modal.set_logs(logs);
+                        modal.mark_loading_complete();
                     }
                 }
                 BgTaskResult::LogsError(e) => {
@@ -967,15 +993,6 @@ impl App {
                 }
                 BgTaskResult::PowerlineLogsError(e) => {
                     self.show_api_error(e);
-                }
-                BgTaskResult::LogProgress {
-                    current,
-                    total,
-                    step_name,
-                } => {
-                    if let Some(modal) = &mut self.log_modal {
-                        modal.set_progress(current, total, step_name);
-                    }
                 }
             }
         }
