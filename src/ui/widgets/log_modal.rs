@@ -56,6 +56,8 @@ pub struct LogModal {
     scroll_to_bottom_pending: bool,
     /// Loading progress: (current, total, step_name)
     load_progress: Option<(usize, usize, String)>,
+    /// When the modal was created (for animations)
+    created_at: Instant,
 }
 
 impl LogModal {
@@ -77,6 +79,7 @@ impl LogModal {
             last_visible_height: 1, // Will be updated on first render
             scroll_to_bottom_pending: false,
             load_progress: None,
+            created_at: Instant::now(),
         }
     }
 
@@ -262,14 +265,14 @@ impl LogModal {
 
     /// Render the logs section with ANSI color support
     fn render_logs(&mut self, f: &mut Frame, area: Rect) {
-        // If loading, show spinner and progress bar in the log area
+        // If loading, show progress bar in the log area
         if self.is_loading {
             let spinner = self.spinner_char();
             let mut lines = Vec::new();
+            let bar_width = (area.width as usize).saturating_sub(6).min(50);
 
             if let Some((current, total, ref step_name)) = self.load_progress {
-                // Progress bar
-                let bar_width = (area.width as usize).saturating_sub(4).min(50);
+                // Determinate progress bar: step-based
                 let filled = if total > 0 {
                     (current * bar_width) / total
                 } else {
@@ -282,15 +285,6 @@ impl LogModal {
                     0
                 };
 
-                let bar = format!(
-                    " [{}{}] {}/{}  {}%",
-                    "█".repeat(filled),
-                    "░".repeat(empty),
-                    current,
-                    total,
-                    percent
-                );
-
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("{} ", spinner),
@@ -299,19 +293,57 @@ impl LogModal {
                     Span::styled("Fetching logs...", Style::default().fg(FG_PRIMARY)),
                 ]));
                 lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(bar, Style::default().fg(ACCENT))));
+                lines.push(Line::from(vec![
+                    Span::styled(" [", Style::default().fg(FG_DIM)),
+                    Span::styled("━".repeat(filled), Style::default().fg(ACCENT)),
+                    Span::styled("─".repeat(empty), Style::default().fg(FG_DIM)),
+                    Span::styled(
+                        format!("] {}/{}  {}%", current, total, percent),
+                        Style::default().fg(FG_DIM),
+                    ),
+                ]));
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     format!(" {}", step_name),
                     Style::default().fg(FG_DIM),
                 )));
             } else {
+                // Indeterminate progress bar: sweeping back and forth
+                let sweep_width = 8.min(bar_width);
+                let cycle_len = bar_width.saturating_sub(sweep_width) + 1;
+                // Time-based animation: ~1.5s per sweep, bounces back and forth
+                let elapsed_ms = self.created_at.elapsed().as_millis() as usize;
+                let cycle_ms = 1500;
+                let phase = elapsed_ms % (cycle_ms * 2);
+                let t = if phase < cycle_ms {
+                    // Moving right
+                    phase
+                } else {
+                    // Moving left (bounce)
+                    cycle_ms * 2 - phase
+                };
+                let pos = if cycle_len > 0 && cycle_ms > 0 {
+                    (t * cycle_len.saturating_sub(1)) / cycle_ms
+                } else {
+                    0
+                };
+                let before = pos;
+                let after = bar_width.saturating_sub(pos + sweep_width);
+
                 lines.push(Line::from(vec![
                     Span::styled(
                         format!("{} ", spinner),
                         Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled("Loading logs...", Style::default().fg(FG_DIM)),
+                    Span::styled("Loading logs...", Style::default().fg(FG_PRIMARY)),
+                ]));
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled(" [", Style::default().fg(FG_DIM)),
+                    Span::styled("─".repeat(before), Style::default().fg(FG_DIM)),
+                    Span::styled("━".repeat(sweep_width), Style::default().fg(ACCENT)),
+                    Span::styled("─".repeat(after), Style::default().fg(FG_DIM)),
+                    Span::styled("]", Style::default().fg(FG_DIM)),
                 ]));
             }
 
