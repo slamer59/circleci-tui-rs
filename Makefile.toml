@@ -1,0 +1,43 @@
+[tasks.setup]
+description = "Set up development environment"
+dependencies = ["install-lefthook", "lefthook-install"]
+
+[tasks.install-lefthook]
+description = "Install lefthook if not present"
+script = '''
+if ! command -v lefthook &> /dev/null; then
+    echo "Installing lefthook..."
+    go install github.com/evilmartians/lefthook@latest
+fi
+'''
+
+[tasks.lefthook-install]
+description = "Install git hooks via lefthook"
+command = "lefthook"
+args = ["install"]
+
+[tasks.lint]
+description = "Run clippy linter"
+command = "cargo"
+args = ["clippy", "--", "-D", "warnings"]
+
+[tasks.fix]
+description = "Auto-fix warnings and format code"
+script = '''
+cargo fix --allow-dirty --allow-staged
+cargo fmt
+'''
+
+[tasks.check]
+description = "Run all checks (fmt, clippy, test)"
+dependencies = ["fmt-check", "lint", "test"]
+
+[tasks.fmt-check]
+description = "Check formatting"
+command = "cargo"
+args = ["fmt", "--", "--check"]
+
+[tasks.test]
+description = "Run tests"
+command = "cargo"
+args = ["test"]
