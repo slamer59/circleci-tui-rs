@@ -576,15 +576,30 @@ impl CircleCIClient {
     /// # Returns
     /// List of formatted log lines with timestamps
     pub async fn stream_job_log(&self, job_number: u32) -> Result<Vec<String>, ApiError> {
+        self.stream_job_log_with_progress(job_number, None).await
+    }
+
+    /// Fetch all logs for a job with optional progress reporting
+    ///
+    /// When a progress sender is provided, it sends `(current_step, total_steps, step_name)`
+    /// after each step is fetched, enabling progress bar display in the UI.
+    pub async fn stream_job_log_with_progress(
+        &self,
+        job_number: u32,
+        progress_tx: Option<tokio::sync::mpsc::UnboundedSender<(usize, usize, String)>>,
+    ) -> Result<Vec<String>, ApiError> {
         let steps = self.get_job_steps(job_number).await?;
         let mut all_logs = Vec::new();
 
+        // Count total actions with logs for progress tracking
+        let total_actions: usize = steps
+            .iter()
+            .flat_map(|s| &s.actions)
+            .filter(|a| a.output_url.is_some())
+            .count();
+
         // Check if any action has logs
-        let has_any_logs = steps.iter().any(|step| {
-            step.actions
-                .iter()
-                .any(|action| action.output_url.is_some())
-        });
+        let has_any_logs = total_actions > 0;
 
         if !has_any_logs {
             // No logs available yet
@@ -597,6 +612,8 @@ impl CircleCIClient {
             all_logs.push("Logs will appear here once the job starts running.".to_string());
             return Ok(all_logs);
         }
+
+        let mut fetched_count = 0usize;
 
         for (step_idx, step) in steps.iter().enumerate() {
             // Add separator between steps (not before first step)
@@ -622,6 +639,12 @@ impl CircleCIClient {
                         Err(e) => {
                             all_logs.push(format!("[Error fetching logs: {}]", e));
                         }
+                    }
+
+                    fetched_count += 1;
+                    // Report progress
+                    if let Some(tx) = &progress_tx {
+                        let _ = tx.send((fetched_count, total_actions, action.name.clone()));
                     }
                 } else if action.status == "running" {
                     all_logs.push("[Waiting for output...]".to_string());

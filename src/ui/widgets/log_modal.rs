@@ -54,6 +54,8 @@ pub struct LogModal {
     last_visible_height: usize,
     /// Pending scroll to bottom on next render
     scroll_to_bottom_pending: bool,
+    /// Loading progress: (current, total, step_name)
+    load_progress: Option<(usize, usize, String)>,
 }
 
 impl LogModal {
@@ -74,6 +76,7 @@ impl LogModal {
             is_loading: true,
             last_visible_height: 1, // Will be updated on first render
             scroll_to_bottom_pending: false,
+            load_progress: None,
         }
     }
 
@@ -83,6 +86,7 @@ impl LogModal {
         self.log_lines = logs;
         self.last_fetch = Instant::now();
         self.is_loading = false;
+        self.load_progress = None;
 
         // Auto-scroll to bottom if:
         // 1. This is the initial load (prev_lines was 1 - the "Loading logs..." message)
@@ -113,6 +117,11 @@ impl LogModal {
     /// Mark that a refresh has been started (prevents duplicate spawns)
     pub fn mark_refresh_started(&mut self) {
         self.last_fetch = Instant::now();
+    }
+
+    /// Update loading progress
+    pub fn set_progress(&mut self, current: usize, total: usize, step_name: String) {
+        self.load_progress = Some((current, total, step_name));
     }
 
     /// Get the job number for this modal
@@ -253,19 +262,60 @@ impl LogModal {
 
     /// Render the logs section with ANSI color support
     fn render_logs(&mut self, f: &mut Frame, area: Rect) {
-        // If loading, show spinner in the center of the log area
+        // If loading, show spinner and progress bar in the log area
         if self.is_loading {
             let spinner = self.spinner_char();
-            let loading_line = Line::from(vec![
-                Span::styled(
-                    format!("{} ", spinner),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("Loading logs...", Style::default().fg(FG_DIM)),
-            ]);
+            let mut lines = Vec::new();
 
-            let loading = Paragraph::new(vec![loading_line])
-                .style(Style::default().bg(BG_DARK).fg(FG_PRIMARY));
+            if let Some((current, total, ref step_name)) = self.load_progress {
+                // Progress bar
+                let bar_width = (area.width as usize).saturating_sub(4).min(50);
+                let filled = if total > 0 {
+                    (current * bar_width) / total
+                } else {
+                    0
+                };
+                let empty = bar_width.saturating_sub(filled);
+                let percent = if total > 0 {
+                    (current * 100) / total
+                } else {
+                    0
+                };
+
+                let bar = format!(
+                    " [{}{}] {}/{}  {}%",
+                    "█".repeat(filled),
+                    "░".repeat(empty),
+                    current,
+                    total,
+                    percent
+                );
+
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} ", spinner),
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("Fetching logs...", Style::default().fg(FG_PRIMARY)),
+                ]));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(bar, Style::default().fg(ACCENT))));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    format!(" {}", step_name),
+                    Style::default().fg(FG_DIM),
+                )));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} ", spinner),
+                        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("Loading logs...", Style::default().fg(FG_DIM)),
+                ]));
+            }
+
+            let loading = Paragraph::new(lines).style(Style::default().bg(BG_DARK).fg(FG_PRIMARY));
 
             f.render_widget(loading, area);
             return;

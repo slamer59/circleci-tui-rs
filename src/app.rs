@@ -48,6 +48,12 @@ pub enum BgTaskResult {
         job_status: Option<String>,
     },
     PowerlineLogsError(anyhow::Error),
+    /// Progress update for log loading
+    LogProgress {
+        current: usize,
+        total: usize,
+        step_name: String,
+    },
 }
 
 /// Application screens
@@ -726,8 +732,27 @@ impl App {
 
         let client = Arc::clone(&self.api_client);
         let tx = self.bg_sender.clone();
+        let progress_tx = tx.clone();
+
+        // Create a progress channel to forward step progress to the UI
+        let (step_tx, mut step_rx) = mpsc::unbounded_channel::<(usize, usize, String)>();
+
+        // Forward progress updates to the main bg channel
         tokio::spawn(async move {
-            match client.stream_job_log(job_number).await {
+            while let Some((current, total, step_name)) = step_rx.recv().await {
+                let _ = progress_tx.send(BgTaskResult::LogProgress {
+                    current,
+                    total,
+                    step_name,
+                });
+            }
+        });
+
+        tokio::spawn(async move {
+            match client
+                .stream_job_log_with_progress(job_number, Some(step_tx))
+                .await
+            {
                 Ok(logs) => {
                     let _ = tx.send(BgTaskResult::LogsLoaded {
                         job_number,
@@ -942,6 +967,15 @@ impl App {
                 }
                 BgTaskResult::PowerlineLogsError(e) => {
                     self.show_api_error(e);
+                }
+                BgTaskResult::LogProgress {
+                    current,
+                    total,
+                    step_name,
+                } => {
+                    if let Some(modal) = &mut self.log_modal {
+                        modal.set_progress(current, total, step_name);
+                    }
                 }
             }
         }
