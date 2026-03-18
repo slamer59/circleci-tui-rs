@@ -16,11 +16,10 @@ use crate::ui::widgets::log_modal::{LogModal, ModalAction};
 use crate::ui::widgets::ssh_modal::{SshAction, SshModal};
 use crate::ui::widgets::status_message::StatusMessage;
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::{backend::Backend, Frame, Terminal};
+use ratatui::Frame;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// Application screens
 #[derive(Debug, Clone)]
@@ -28,7 +27,7 @@ pub enum Screen {
     /// Screen 1: Pipeline list screen
     Pipelines,
     /// Screen 2: Pipeline detail screen (workflow tree + jobs list)
-    PipelineDetail(Pipeline),
+    PipelineDetail,
 }
 
 /// Main application state
@@ -43,8 +42,6 @@ pub struct App {
     pub log_modal: Option<LogModal>,
     /// Should quit flag
     pub should_quit: bool,
-    /// Application configuration
-    pub config: Config,
     /// CircleCI API client
     pub api_client: Arc<CircleCIClient>,
     /// Loading state
@@ -67,8 +64,6 @@ pub struct App {
     pub pending_log_load: Option<u32>,
     /// Pending load more jobs (workflow_id)
     pub pending_load_more_jobs: Option<String>,
-    /// Authenticated CircleCI user (for "Mine" filter)
-    pub authenticated_user: Option<String>,
     /// Preferences manager
     pub preferences: PreferencesManager,
     /// Log cache manager for disk-based caching
@@ -129,8 +124,13 @@ impl App {
         // Smart branch selection: LOCAL → GLOBAL
         // Always use current git branch if available, otherwise use saved preference
         let current_git_branch = crate::git::get_current_branch();
-        let branch_to_use = current_git_branch
-            .or_else(|| preferences.get_preferences().pipeline_filters.branch.clone());
+        let branch_to_use = current_git_branch.or_else(|| {
+            preferences
+                .get_preferences()
+                .pipeline_filters
+                .branch
+                .clone()
+        });
 
         // Create modified preferences with current branch priority
         let mut filter_prefs = preferences.get_preferences().pipeline_filters.clone();
@@ -148,10 +148,8 @@ impl App {
         log_cache_manager.cleanup_old_entries()?; // Run cleanup on startup
 
         // Initialize prefetch coordinator
-        let prefetch_coordinator = PrefetchCoordinator::new(
-            Arc::new(log_cache_manager.clone()),
-            Arc::clone(&api_client),
-        );
+        let prefetch_coordinator =
+            PrefetchCoordinator::new(Arc::new(log_cache_manager.clone()), Arc::clone(&api_client));
 
         Ok(Self {
             current_screen: Screen::Pipelines,
@@ -159,7 +157,6 @@ impl App {
             pipeline_detail_screen: None,
             log_modal: None,
             should_quit: false,
-            config,
             api_client,
             confirm_modal: None,
             error_modal: None,
@@ -171,38 +168,10 @@ impl App {
             pending_job_load: None,
             pending_log_load: None,
             pending_load_more_jobs: None,
-            authenticated_user,
             preferences,
             log_cache_manager,
             prefetch_coordinator,
         })
-    }
-
-    /// Run the main application loop
-    ///
-    /// This method handles the event loop, rendering, and input handling.
-    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
-        loop {
-            // Draw the UI
-            terminal.draw(|f| self.render(f))?;
-
-            // Handle input events
-            if event::poll(Duration::from_millis(100))? {
-                if let Event::Key(key) = event::read()? {
-                    // Only process key press events, not key release
-                    if key.kind == KeyEventKind::Press {
-                        self.handle_event(key)?;
-                    }
-                }
-            }
-
-            // Check if we should quit
-            if self.should_quit {
-                break;
-            }
-        }
-
-        Ok(())
     }
 
     /// Handle input events
@@ -268,7 +237,9 @@ impl App {
 
                         // Find the workflow name from the pipeline detail screen
                         if let Some(detail) = &self.pipeline_detail_screen {
-                            if let Some(workflow) = detail.workflows.iter().find(|w| w.id == workflow_id) {
+                            if let Some(workflow) =
+                                detail.workflows.iter().find(|w| w.id == workflow_id)
+                            {
                                 // Show confirmation modal for rerunning the workflow
                                 self.confirm_modal = Some(ConfirmModal::new(format!(
                                     "Rerun workflow: {}?",
@@ -348,7 +319,7 @@ impl App {
                     }
                 }
             }
-            Screen::PipelineDetail(_) => {
+            Screen::PipelineDetail => {
                 // Handle Esc to go back to pipelines
                 if key.code == KeyCode::Esc {
                     self.navigate_back_to_pipelines();
@@ -466,7 +437,7 @@ impl App {
             Screen::Pipelines => {
                 self.pipeline_screen.render(f, main_area);
             }
-            Screen::PipelineDetail(_) => {
+            Screen::PipelineDetail => {
                 if let Some(detail) = &mut self.pipeline_detail_screen {
                     detail.render(f, main_area);
                 }
@@ -512,7 +483,7 @@ impl App {
 
         // Trigger async workflow loading
         self.pending_workflow_load = Some(pipeline.id.clone());
-        self.current_screen = Screen::PipelineDetail(pipeline);
+        self.current_screen = Screen::PipelineDetail;
     }
 
     /// Navigate back to the pipelines screen (Screen 1)
@@ -563,10 +534,7 @@ impl App {
             .faceted_search
             .get_filter_value(0)
             .unwrap_or("All pipelines");
-        let branch_filter = self
-            .pipeline_screen
-            .faceted_search
-            .get_filter_value(1);
+        let branch_filter = self.pipeline_screen.faceted_search.get_filter_value(1);
 
         // Convert filters to API parameters (server-side filtering)
         let mine = owner_filter == "Mine";
@@ -625,10 +593,8 @@ impl App {
         // Collect results
         let mut pipeline_workflows = HashMap::new();
         for task in tasks {
-            if let Ok((pipeline_id, result)) = task.await {
-                if let Ok(workflows) = result {
-                    pipeline_workflows.insert(pipeline_id, workflows);
-                }
+            if let Ok((pipeline_id, Ok(workflows))) = task.await {
+                pipeline_workflows.insert(pipeline_id, workflows);
                 // Silently ignore errors - workflows will show loading state
             }
         }
@@ -732,33 +698,6 @@ impl App {
 
         Ok(())
     }
-    /// Rerun a workflow
-    ///
-    /// This is an async method that triggers a workflow rerun.
-    pub async fn rerun_workflow(&mut self, workflow_id: &str) -> Result<()> {
-        // Show loading message
-        self.status_message = Some(StatusMessage::info(format!(
-            "Rerunning workflow {}...",
-            workflow_id
-        )));
-
-        // Call API to rerun workflow
-        match self.api_client.rerun_workflow(workflow_id).await {
-            Ok(_) => {
-                self.status_message = Some(StatusMessage::success(format!(
-                    "Workflow {} rerun successful!",
-                    workflow_id
-                )));
-            }
-            Err(e) => {
-                self.status_message = Some(StatusMessage::error(format!(
-                    "Failed to rerun workflow: {}",
-                    e
-                )));
-            }
-        }
-        Ok(())
-    }
 
     /// Load logs for a job
     ///
@@ -773,7 +712,7 @@ impl App {
                 if let Some(modal) = &mut self.log_modal {
                     modal.set_logs(entry.logs);
                 }
-                return Ok(());
+                Ok(())
             }
             _ => {
                 // Cache miss or stale, fetch from API
@@ -830,7 +769,8 @@ impl App {
             self.prefetch_coordinator.cancel_jobs(to_cancel);
 
             // Start prefetch for visible jobs
-            self.prefetch_coordinator.prefetch_jobs(visible_jobs.clone(), jobs);
+            self.prefetch_coordinator
+                .prefetch_jobs(visible_jobs.clone(), jobs);
 
             // Update tracking
             if let Some(detail) = &mut self.pipeline_detail_screen {
@@ -935,52 +875,6 @@ impl App {
         if let Some(detail) = &mut self.pipeline_detail_screen {
             detail.tick_powerline();
         }
-    }
-
-    /// Show an error modal with a message
-    ///
-    /// # Arguments
-    ///
-    /// * `title` - The title of the error modal
-    /// * `message` - The error message to display
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// app.show_error("API Error", "Failed to connect to CircleCI API");
-    /// ```
-    pub fn show_error(&mut self, title: impl Into<String>, message: impl Into<String>) {
-        self.error_modal = Some(ErrorModal::new(title.into(), message.into()));
-    }
-
-    /// Show an error modal with a message and detailed information
-    ///
-    /// # Arguments
-    ///
-    /// * `title` - The title of the error modal
-    /// * `message` - The error message to display
-    /// * `details` - Detailed error information
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// app.show_error_with_details(
-    ///     "API Error",
-    ///     "API returned error 404: Not Found",
-    ///     "GET /api/v2/pipeline/abc123\nResponse: {\"message\":\"not found\"}"
-    /// );
-    /// ```
-    pub fn show_error_with_details(
-        &mut self,
-        title: impl Into<String>,
-        message: impl Into<String>,
-        details: impl Into<String>,
-    ) {
-        self.error_modal = Some(ErrorModal::with_details(
-            title.into(),
-            message.into(),
-            details.into(),
-        ));
     }
 
     /// Save current filter state to preferences
@@ -1199,7 +1093,7 @@ mod tests {
 
         // Navigate to pipeline detail (Screen 2)
         app.navigate_to_pipeline_detail(pipeline.clone());
-        assert!(matches!(app.current_screen, Screen::PipelineDetail(_)));
+        assert!(matches!(app.current_screen, Screen::PipelineDetail));
         assert!(app.pipeline_detail_screen.is_some());
         assert!(app.log_modal.is_none());
 
@@ -1257,7 +1151,7 @@ mod tests {
 
         // Navigate to Screen 2 (Pipeline Detail)
         app.navigate_to_pipeline_detail(pipeline.clone());
-        assert!(matches!(app.current_screen, Screen::PipelineDetail(_)));
+        assert!(matches!(app.current_screen, Screen::PipelineDetail));
 
         // There are only 2 screens now, no third screen
         assert!(app.pipeline_detail_screen.is_some());

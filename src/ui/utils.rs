@@ -1,4 +1,4 @@
-/// String utility functions for UI rendering
+//! String utility functions for UI rendering
 
 /// Truncate a string to a maximum length, adding "..." if truncated.
 ///
@@ -9,18 +9,6 @@ pub fn truncate_string(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
-/// Truncate a string from the left, showing the end of the string with "..." prefix.
-///
-/// Useful for showing the end of branch names or paths.
-pub fn truncate_string_left(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        let start = s.len() - max_len.saturating_sub(3);
-        format!("...{}", &s[start..])
     }
 }
 
@@ -35,7 +23,10 @@ mod tests {
 
     #[test]
     fn test_truncate_string_with_truncation() {
-        assert_eq!(truncate_string("this is a very long string", 10), "this is...");
+        assert_eq!(
+            truncate_string("this is a very long string", 10),
+            "this is..."
+        );
     }
 
     #[test]

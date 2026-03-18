@@ -151,23 +151,6 @@ impl FacetedSearchBar {
         }
     }
 
-    /// Render the faceted search bar to the given frame area.
-    ///
-    /// This renders both the filter buttons and the dropdown (if open).
-    ///
-    /// # Arguments
-    ///
-    /// * `f` - The frame to render to
-    /// * `area` - The area to render the filter bar in (typically 3 lines tall)
-    pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        self.render_filter_bar(f, area);
-
-        // Render dropdown if open
-        if self.dropdown_open {
-            self.render_dropdown(f, area);
-        }
-    }
-
     /// Render ONLY the dropdown (if open) without rendering the filter bar.
     ///
     /// This is used when you want to render the dropdown separately after other content
@@ -296,19 +279,6 @@ impl FacetedSearchBar {
         }
     }
 
-    /// Get a list of active filters (non-default selections) for display.
-    ///
-    /// # Returns
-    ///
-    /// Vector of strings describing active filters (e.g., "☍: My pipelines")
-    pub fn get_active_filters(&self) -> Vec<String> {
-        self.facets
-            .iter()
-            .filter(|f| f.is_filtered())
-            .map(|f| format!("{}: {}", f.icon, f.selected_option()))
-            .collect()
-    }
-
     /// Get the count of active filters (non-default selections).
     ///
     /// # Returns
@@ -328,7 +298,8 @@ impl FacetedSearchBar {
     ///
     /// The selected index for the facet, or 0 if index is out of bounds
     pub fn get_facet_selection(&self, facet_index: usize) -> usize {
-        self.facets.get(facet_index)
+        self.facets
+            .get(facet_index)
             .map(|f| f.selected_index)
             .unwrap_or(0)
     }
@@ -395,43 +366,6 @@ impl FacetedSearchBar {
     /// `true` if dropdown is open, `false` otherwise
     pub fn is_active(&self) -> bool {
         self.dropdown_open
-    }
-
-    /// Get the current filter state as a vector of selected indices.
-    ///
-    /// This can be used to save filter state for later restoration.
-    /// Note: Filter state is automatically persisted in the App struct's pipeline_screen,
-    /// so manual save/restore is typically not needed.
-    ///
-    /// # Returns
-    ///
-    /// Vector of selected indices for each facet
-    pub fn get_filter_state(&self) -> Vec<usize> {
-        self.facets.iter().map(|f| f.selected_index).collect()
-    }
-
-    /// Restore filter state from a previously saved state.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Vector of selected indices for each facet
-    ///
-    /// # Returns
-    ///
-    /// `true` if state was restored successfully, `false` if state length doesn't match
-    pub fn restore_filter_state(&mut self, state: &[usize]) -> bool {
-        if state.len() != self.facets.len() {
-            return false;
-        }
-
-        for (idx, &selected_idx) in state.iter().enumerate() {
-            if selected_idx < self.facets[idx].options.len() {
-                self.facets[idx].selected_index = selected_idx;
-                self.facets[idx].update_name();
-            }
-        }
-
-        true
     }
 
     /// Update the options for a specific facet.

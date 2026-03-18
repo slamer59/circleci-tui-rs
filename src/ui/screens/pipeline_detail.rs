@@ -5,8 +5,8 @@
 /// - Right Panel (70%): Filtered jobs list for the selected workflow
 use crate::api::models::{Job, Pipeline, Workflow};
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BG_PANEL, FG_BRIGHT, FG_DIM,
-    FG_PRIMARY, RUNNING, SECONDARY,
+    get_status_color, get_status_icon, ACCENT, BG_PANEL, FG_BRIGHT, FG_DIM, FG_PRIMARY, RUNNING,
+    SECONDARY,
 };
 use crate::ui::utils::truncate_string;
 use crate::ui::widgets::breadcrumb::render_breadcrumb;
@@ -19,7 +19,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState},
+    widgets::{
+        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table,
+        TableState,
+    },
     Frame,
 };
 use std::collections::HashMap;
@@ -34,7 +37,6 @@ pub enum PanelFocus {
     /// Status filters (checkboxes)
     Filters,
 }
-
 
 /// Action returned from input handling
 #[derive(Debug, Clone, PartialEq)]
@@ -87,8 +89,6 @@ pub struct PipelineDetailScreen {
     pub next_page_token: Option<String>,
     /// Total jobs count (estimated if more pages exist)
     pub total_jobs_count: Option<usize>,
-    /// Show rerun confirmation modal
-    pub show_rerun_confirm: bool,
     /// Workflow ID to rerun (if confirmation is shown)
     pub confirm_workflow_id: Option<String>,
     /// Spinner for loading state
@@ -172,7 +172,6 @@ impl PipelineDetailScreen {
             loading_jobs: false,
             loading_more_jobs: false,
             next_page_token: None,
-            show_rerun_confirm: false,
             confirm_workflow_id: None,
             total_jobs_count: None,
             spinner: Spinner::new("Loading..."),
@@ -196,9 +195,14 @@ impl PipelineDetailScreen {
     }
 
     /// Apply saved filter preferences
-    pub fn apply_filter_preferences(&mut self, prefs: &crate::preferences::PipelineDetailFilterPrefs) {
-        self.faceted_search.set_facet_selection(0, prefs.status_index);
-        self.faceted_search.set_facet_selection(1, prefs.duration_index);
+    pub fn apply_filter_preferences(
+        &mut self,
+        prefs: &crate::preferences::PipelineDetailFilterPrefs,
+    ) {
+        self.faceted_search
+            .set_facet_selection(0, prefs.status_index);
+        self.faceted_search
+            .set_facet_selection(1, prefs.duration_index);
     }
 
     /// Set workflows from external source (e.g., API)
@@ -207,18 +211,6 @@ impl PipelineDetailScreen {
         if !self.workflows.is_empty() {
             self.selected_workflow_index = 0;
             self.workflow_list_state.select(Some(0));
-        }
-    }
-
-    /// Set jobs from external source (e.g., API)
-    pub fn set_jobs(&mut self, jobs: Vec<Job>) {
-        self.jobs = jobs;
-        if !self.jobs.is_empty() {
-            self.selected_job_index = Some(0);
-            self.job_table_state.select(Some(0));
-        } else {
-            self.selected_job_index = None;
-            self.job_table_state.select(None);
         }
     }
 
@@ -351,13 +343,18 @@ impl PipelineDetailScreen {
                 let matches_duration = match duration_filter {
                     "All durations" => true,
                     "Quick (< 1min)" => job.duration.map(|d| d < 60).unwrap_or(false),
-                    "Short (1-5min)" => job.duration.map(|d| (60..300).contains(&d)).unwrap_or(false),
-                    "Medium (5-15min)" => {
-                        job.duration.map(|d| (300..900).contains(&d)).unwrap_or(false)
-                    }
-                    "Long (15-30min)" => {
-                        job.duration.map(|d| (900..1800).contains(&d)).unwrap_or(false)
-                    }
+                    "Short (1-5min)" => job
+                        .duration
+                        .map(|d| (60..300).contains(&d))
+                        .unwrap_or(false),
+                    "Medium (5-15min)" => job
+                        .duration
+                        .map(|d| (300..900).contains(&d))
+                        .unwrap_or(false),
+                    "Long (15-30min)" => job
+                        .duration
+                        .map(|d| (900..1800).contains(&d))
+                        .unwrap_or(false),
                     "Very Long (>30min)" => job.duration.map(|d| d >= 1800).unwrap_or(false),
                     _ => true,
                 };
@@ -884,19 +881,20 @@ impl PipelineDetailScreen {
     /// Render the faceted search bar (status and duration filters)
     fn render_faceted_search_bar(&mut self, f: &mut Frame, area: Rect) {
         // Determine border style based on focus - match pipelines.rs styling
-        let (border_style, border_type, title_style) = if self.focus == PanelFocus::Filters || self.faceted_search.is_active() {
-            (
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                BorderType::Double,
-                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
-            )
-        } else {
-            (
-                Style::default().fg(ACCENT),
-                BorderType::Rounded,
-                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
-            )
-        };
+        let (border_style, border_type, title_style) =
+            if self.focus == PanelFocus::Filters || self.faceted_search.is_active() {
+                (
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    BorderType::Double,
+                    Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                (
+                    Style::default().fg(ACCENT),
+                    BorderType::Rounded,
+                    Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+                )
+            };
 
         // Create bordered block for filter bar (complete borders like pipelines.rs)
         let block = Block::default()
@@ -953,10 +951,7 @@ impl PipelineDetailScreen {
         ]));
 
         let job_name_cell = Cell::from(Text::from(vec![
-            Line::from(Span::styled(
-                job_name,
-                Style::default().fg(FG_PRIMARY),
-            )),
+            Line::from(Span::styled(job_name, Style::default().fg(FG_PRIMARY))),
             Line::from(Span::styled(
                 format!("  {}", status_message),
                 Style::default().fg(FG_DIM),
@@ -1080,10 +1075,10 @@ impl PipelineDetailScreen {
         } else {
             // Normal rendering with Table widget - compact fixed columns, JOB NAME fills remaining
             let widths = [
-                Constraint::Length(3),   // STATUS: icon (compact)
-                Constraint::Length(8),   // TIME: HH:MM format (compact)
-                Constraint::Fill(1),     // JOB NAME: expand to fill available space
-                Constraint::Length(10),  // DURATION: time display (compact)
+                Constraint::Length(3),  // STATUS: icon (compact)
+                Constraint::Length(8),  // TIME: HH:MM format (compact)
+                Constraint::Fill(1),    // JOB NAME: expand to fill available space
+                Constraint::Length(10), // DURATION: time display (compact)
             ];
 
             // Create header row
@@ -1127,7 +1122,11 @@ impl PipelineDetailScreen {
                         Line::from(Span::styled(
                             load_more_text,
                             Style::default()
-                                .fg(if self.loading_more_jobs { RUNNING } else { ACCENT })
+                                .fg(if self.loading_more_jobs {
+                                    RUNNING
+                                } else {
+                                    ACCENT
+                                })
                                 .add_modifier(Modifier::BOLD),
                         )),
                     ])),
@@ -1216,7 +1215,10 @@ impl PipelineDetailScreen {
             } else {
                 // Navigating filter buttons
                 footer_items.push(Span::styled("[←→/Tab]", Style::default().fg(ACCENT)));
-                footer_items.push(Span::styled(" Switch Filter  ", Style::default().fg(FG_PRIMARY)));
+                footer_items.push(Span::styled(
+                    " Switch Filter  ",
+                    Style::default().fg(FG_PRIMARY),
+                ));
                 footer_items.push(Span::styled("[⏎/Space]", Style::default().fg(ACCENT)));
                 footer_items.push(Span::styled(" Open  ", Style::default().fg(FG_PRIMARY)));
                 footer_items.push(Span::styled("[Esc]", Style::default().fg(ACCENT)));
@@ -1254,7 +1256,7 @@ impl PipelineDetailScreen {
     /// Get the currently selected job
     pub fn get_selected_job(&self) -> Option<&Job> {
         self.selected_job_index
-            .and_then(|idx| self.get_filtered_jobs().get(idx).map(|j| *j))
+            .and_then(|idx| self.get_filtered_jobs().get(idx).copied())
     }
 
     /// Calculate visible job numbers for prefetching based on viewport and selection
@@ -1300,8 +1302,8 @@ impl PipelineDetailScreen {
     fn copy_to_clipboard(text: &str) -> Result<(), String> {
         use arboard::Clipboard;
 
-        let mut clipboard = Clipboard::new()
-            .map_err(|e| format!("Clipboard unavailable: {}", e))?;
+        let mut clipboard =
+            Clipboard::new().map_err(|e| format!("Clipboard unavailable: {}", e))?;
 
         #[cfg(target_os = "linux")]
         {
@@ -1403,7 +1405,7 @@ impl PipelineDetailScreen {
         };
 
         // Check for range format "start,end" or "start:end"
-        if let Some(sep_pos) = input.find(|c| c == ',' || c == ':') {
+        if let Some(sep_pos) = input.find([',', ':']) {
             let (start_str, end_str) = input.split_at(sep_pos);
             let end_str = &end_str[1..]; // Skip separator
 
@@ -1417,7 +1419,10 @@ impl PipelineDetailScreen {
                 return Err("End line must be >= start line".to_string());
             }
             if start > max_lines {
-                return Err(format!("Start line {} exceeds total lines {}", start, max_lines));
+                return Err(format!(
+                    "Start line {} exceeds total lines {}",
+                    start, max_lines
+                ));
             }
 
             let end_clamped = end.min(max_lines);
@@ -1452,7 +1457,6 @@ impl PipelineDetailScreen {
         logs[start_idx..end_idx].to_vec()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1724,7 +1728,6 @@ mod tests {
             .all(|job| job.status == "failed" || job.status == "error" || job.status == "failure"));
     }
 
-
     #[test]
     fn test_duration_filter() {
         let pipeline = create_test_pipeline();
@@ -1800,5 +1803,4 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "long");
     }
-
 }

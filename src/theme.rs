@@ -27,14 +27,14 @@ pub const BG_DARK: Color = Color::Rgb(11, 14, 20); // #0b0e14
 /// Elevated panel background
 pub const BG_PANEL: Color = Color::Rgb(30, 34, 48); // #1e2230
 
-/// Highlight background for active elements
-pub const BG_HIGHLIGHT: Color = Color::Rgb(18, 22, 30); // #12161e
+// /// Highlight background for active elements
+// pub const BG_HIGHLIGHT: Color = Color::Rgb(18, 22, 30); // #12161e
 
-/// Slightly lighter background for hover states
-pub const BG_HOVER: Color = Color::Rgb(24, 28, 38); // #181c26
+// /// Slightly lighter background for hover states
+// pub const BG_HOVER: Color = Color::Rgb(24, 28, 38); // #181c26
 
-/// Deep background for input fields
-pub const BG_INPUT: Color = Color::Rgb(15, 18, 25); // #0f1219
+// /// Deep background for input fields
+// pub const BG_INPUT: Color = Color::Rgb(15, 18, 25); // #0f1219
 
 // =============================================================================
 // Foreground Colors
@@ -84,8 +84,8 @@ pub const ACCENT: Color = Color::Rgb(247, 26, 189); // #f71abd
 /// Secondary accent color (cyan/light blue) - Voltage brand color for selected items
 pub const SECONDARY: Color = Color::Rgb(96, 240, 248); // #60F0F8
 
-/// Dimmed accent color (soft pink)
-pub const ACCENT_DIM: Color = Color::Rgb(247, 168, 179); // #f7a8b3
+// /// Dimmed accent color (soft pink)
+// pub const ACCENT_DIM: Color = Color::Rgb(247, 168, 179); // #f7a8b3
 
 /// Warning accent color (coral)
 pub const ACCENT_WARN: Color = Color::Rgb(235, 99, 107); // #eb636b
@@ -100,8 +100,8 @@ pub const BORDER: Color = Color::Rgb(44, 49, 58); // #2c313a
 /// Focused border color
 pub const BORDER_FOCUSED: Color = Color::Rgb(247, 26, 189); // #f71abd
 
-/// Subtle border color for nested elements
-pub const BORDER_SUBTLE: Color = Color::Rgb(62, 68, 81); // #3e4451
+// /// Subtle border color for nested elements
+// pub const BORDER_SUBTLE: Color = Color::Rgb(62, 68, 81); // #3e4451
 
 // =============================================================================
 // Helper Functions

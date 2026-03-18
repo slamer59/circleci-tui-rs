@@ -40,32 +40,6 @@ pub struct ErrorModal {
 }
 
 impl ErrorModal {
-    /// Create a new error modal with a title and error message
-    ///
-    /// # Arguments
-    ///
-    /// * `title` - The title of the error modal (e.g., "API Error", "Error")
-    /// * `error_message` - The main error message to display
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let modal = ErrorModal::new(
-    ///     "API Error".to_string(),
-    ///     "Failed to connect to CircleCI API".to_string()
-    /// );
-    /// ```
-    pub fn new(title: String, error_message: String) -> Self {
-        Self {
-            title,
-            error_message,
-            details: None,
-            visible: true,
-            details_expanded: false,
-            can_retry: false,
-        }
-    }
-
     /// Create a new error modal with title, message, and detailed information
     ///
     /// # Arguments
@@ -136,14 +110,14 @@ impl ErrorModal {
 
         // Calculate modal height based on content
         let base_height = 12; // Minimum height
-        let details_height = if self.details_expanded && self.details.is_some() {
-            // Calculate how many lines the details will take
-            let details_text = self.details.as_ref().unwrap();
-            let lines = details_text.lines().count().max(3) as u16;
-            lines.min(15) // Cap at 15 lines
-        } else {
-            0
-        };
+        let details_height =
+            if let (true, Some(details_text)) = (self.details_expanded, &self.details) {
+                // Calculate how many lines the details will take
+                let lines = details_text.lines().count().max(3) as u16;
+                lines.min(15) // Cap at 15 lines
+            } else {
+                0
+            };
         let total_height = (base_height + details_height).min(80); // Cap at 80%
 
         // Calculate centered modal area (50% width, dynamic height)
@@ -302,16 +276,6 @@ impl ErrorModal {
             Paragraph::new(vec![Line::from(""), buttons]).alignment(Alignment::Center);
 
         f.render_widget(buttons_paragraph, area);
-    }
-
-    /// Check if the modal is visible
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    /// Hide the modal
-    pub fn hide(&mut self) {
-        self.visible = false;
     }
 }
 

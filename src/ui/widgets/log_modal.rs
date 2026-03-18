@@ -5,8 +5,8 @@
 
 use crate::api::models::Job;
 use crate::theme::{
-    get_status_color, get_status_icon, ACCENT, BG_DARK, BG_PANEL, BORDER_FOCUSED, FAILED_TEXT,
-    FG_BRIGHT, FG_DIM, FG_PRIMARY, SUCCESS,
+    get_status_color, get_status_icon, ACCENT, BG_DARK, BG_PANEL, BORDER_FOCUSED, FG_BRIGHT,
+    FG_DIM, FG_PRIMARY,
 };
 use ansi_to_tui::IntoText;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -115,35 +115,6 @@ impl LogModal {
         self.job.job_number
     }
 
-    /// Check if this job is streaming
-    pub fn is_streaming(&self) -> bool {
-        self.is_streaming
-    }
-
-    /// Mark job as no longer streaming (completed)
-    pub fn set_completed(&mut self) {
-        self.is_streaming = false;
-        self.auto_scroll = false; // Stop auto-scrolling when job completes
-    }
-
-    /// Update the job information (useful when refreshing to check if job completed)
-    pub fn update_job(&mut self, job: Job) {
-        let was_streaming = self.is_streaming;
-        self.job = job.clone();
-        self.is_streaming = job.is_running();
-
-        // If job was streaming but is no longer running, mark as completed
-        if was_streaming && !self.is_streaming {
-            self.auto_scroll = false;
-        }
-    }
-
-    /// Scroll to the bottom of the logs
-    fn scroll_to_bottom(&mut self) {
-        // Set pending flag - actual scroll happens in render_logs when we know visible height
-        self.scroll_to_bottom_pending = true;
-    }
-
     /// Render the modal to the frame
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         if !self.visible {
@@ -190,22 +161,6 @@ impl LogModal {
         // Render footer - pass the log area height for accurate scroll calculation
         let log_area_height = chunks[1].height as usize;
         self.render_footer(f, chunks[2], log_area_height);
-    }
-
-    /// Render loading indicator with animated spinner
-    fn render_loading_indicator(&self, f: &mut Frame, area: Rect) {
-        let spinner = self.spinner_char();
-        let loading_line = Line::from(vec![
-            Span::styled(
-                format!("{} ", spinner),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("Loading logs...", Style::default().fg(FG_DIM)),
-        ]);
-
-        let loading = Paragraph::new(vec![loading_line]).style(Style::default().bg(BG_PANEL));
-
-        f.render_widget(loading, area);
     }
 
     /// Render the header section with job details
@@ -375,8 +330,12 @@ impl LogModal {
                                     }
 
                                     // Convert modifiers
-                                    style = style.add_modifier(Self::convert_modifier(ansi_span.style.add_modifier));
-                                    style = style.remove_modifier(Self::convert_modifier(ansi_span.style.sub_modifier));
+                                    style = style.add_modifier(Self::convert_modifier(
+                                        ansi_span.style.add_modifier,
+                                    ));
+                                    style = style.remove_modifier(Self::convert_modifier(
+                                        ansi_span.style.sub_modifier,
+                                    ));
 
                                     Span::styled(ansi_span.content.to_string(), style)
                                 })
@@ -522,50 +481,6 @@ impl LogModal {
         result
     }
 
-    /// Apply syntax highlighting to a log line (returns owned Line)
-    fn highlight_log_line(&self, line: &str) -> Line<'static> {
-        // Command lines (starting with $)
-        if line.trim_start().starts_with('$') {
-            return Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ));
-        }
-
-        // Success lines (containing ✓ or "success")
-        if line.contains('✓') || line.to_lowercase().contains("success") {
-            return Line::from(Span::styled(line.to_string(), Style::default().fg(SUCCESS)));
-        }
-
-        // Error lines (containing ✗ or "error"/"failed")
-        if line.contains('✗')
-            || line.to_lowercase().contains("error")
-            || line.to_lowercase().contains("failed")
-        {
-            return Line::from(Span::styled(
-                line.to_string(),
-                Style::default().fg(FAILED_TEXT),
-            ));
-        }
-
-        // Timestamp lines (starting with [)
-        if line.trim_start().starts_with('[') {
-            let parts: Vec<&str> = line.splitn(2, ']').collect();
-            if parts.len() == 2 {
-                return Line::from(vec![
-                    Span::styled(format!("{}]", parts[0]), Style::default().fg(FG_DIM)),
-                    Span::styled(parts[1].to_string(), Style::default().fg(FG_PRIMARY)),
-                ]);
-            }
-        }
-
-        // Default styling
-        Line::from(Span::styled(
-            line.to_string(),
-            Style::default().fg(FG_PRIMARY),
-        ))
-    }
-
     /// Handle keyboard input
     pub fn handle_input(&mut self, key: KeyEvent) -> ModalAction {
         match key.code {
@@ -638,103 +553,6 @@ impl LogModal {
             self.scroll_offset += 1;
         }
     }
-
-    /// Load mock logs for the job
-    fn load_mock_logs(job: &Job) -> Vec<String> {
-        let status = job.status.to_lowercase();
-
-        match status.as_str() {
-            "failed" | "error" => Self::generate_failed_logs(job),
-            "success" | "passed" => Self::generate_success_logs(job),
-            "running" | "in_progress" => Self::generate_running_logs(job),
-            _ => Self::generate_generic_logs(job),
-        }
-    }
-
-    /// Generate mock logs for a failed job
-    fn generate_failed_logs(job: &Job) -> Vec<String> {
-        vec![
-            "[16:55:01] Pulling Docker image...".to_string(),
-            format!("[16:55:12] ✓ Image pulled: {}", job.executor.executor_type),
-            "[16:55:15] Setting up environment variables".to_string(),
-            "[16:55:16] ✓ Environment ready".to_string(),
-            "".to_string(),
-            format!("[16:55:17] $ cd /home/circleci/project && {}", job.name),
-            format!("[16:55:18] Running {}...", job.name),
-            "".to_string(),
-            "[16:57:20] ✗ Connection timeout".to_string(),
-            "           at puppeteer.js:142".to_string(),
-            "           Failed to connect to".to_string(),
-            "           http://localhost:3000".to_string(),
-            "".to_string(),
-            "[16:57:21] Error: Test suite failed to run".to_string(),
-            "           ECONNREFUSED: Connection refused".to_string(),
-            "".to_string(),
-            "[16:57:30] ✗ Exit code: 1".to_string(),
-            "".to_string(),
-            "Job failed. Check the logs above for details.".to_string(),
-        ]
-    }
-
-    /// Generate mock logs for a successful job
-    fn generate_success_logs(job: &Job) -> Vec<String> {
-        vec![
-            "[14:20:01] Pulling Docker image...".to_string(),
-            format!("[14:20:08] ✓ Image pulled: {}", job.executor.executor_type),
-            "[14:20:10] Setting up environment variables".to_string(),
-            "[14:20:11] ✓ Environment ready".to_string(),
-            "".to_string(),
-            format!("[14:20:12] $ cd /home/circleci/project && {}", job.name),
-            format!("[14:20:13] Running {}...", job.name),
-            "".to_string(),
-            "[14:20:15] Installing dependencies...".to_string(),
-            "[14:20:45] ✓ Dependencies installed".to_string(),
-            "".to_string(),
-            "[14:20:46] Running tests...".to_string(),
-            "[14:21:12] ✓ All tests passed (127 tests)".to_string(),
-            "".to_string(),
-            "[14:21:15] Generating coverage report...".to_string(),
-            "[14:21:18] ✓ Coverage: 94.2%".to_string(),
-            "".to_string(),
-            "[14:21:20] ✓ Exit code: 0".to_string(),
-            "".to_string(),
-            "Job completed successfully!".to_string(),
-        ]
-    }
-
-    /// Generate mock logs for a running job
-    fn generate_running_logs(job: &Job) -> Vec<String> {
-        vec![
-            "[18:30:01] Pulling Docker image...".to_string(),
-            format!("[18:30:07] ✓ Image pulled: {}", job.executor.executor_type),
-            "[18:30:09] Setting up environment variables".to_string(),
-            "[18:30:10] ✓ Environment ready".to_string(),
-            "".to_string(),
-            format!("[18:30:11] $ cd /home/circleci/project && {}", job.name),
-            format!("[18:30:12] Running {}...", job.name),
-            "".to_string(),
-            "[18:30:15] Installing dependencies...".to_string(),
-            "[18:31:22] ✓ Dependencies installed".to_string(),
-            "".to_string(),
-            "[18:31:23] Building application...".to_string(),
-            "[18:31:45] Compiling modules (65/120)...".to_string(),
-            "".to_string(),
-            "Job is currently running...".to_string(),
-        ]
-    }
-
-    /// Generate generic mock logs
-    fn generate_generic_logs(job: &Job) -> Vec<String> {
-        vec![
-            "[10:00:01] Preparing job environment...".to_string(),
-            format!("[10:00:05] Executor: {}", job.executor.executor_type),
-            format!("[10:00:06] Job: {}", job.name),
-            "".to_string(),
-            "[10:00:10] Waiting for resources...".to_string(),
-            "".to_string(),
-            format!("Status: {}", job.status),
-        ]
-    }
 }
 
 /// Calculate a centered rectangle with given percentage dimensions
@@ -771,7 +589,7 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::models::{mock_data, ExecutorInfo};
+    use crate::api::models::ExecutorInfo;
 
     fn create_test_job() -> Job {
         use chrono::{Duration, Utc};
@@ -855,51 +673,5 @@ mod tests {
         assert_eq!(centered.height, 80);
         assert_eq!(centered.x, 10);
         assert_eq!(centered.y, 10);
-    }
-
-    #[test]
-    fn test_load_mock_logs_failed() {
-        use chrono::{Duration, Utc};
-
-        let job = Job {
-            id: "test".to_string(),
-            name: "test".to_string(),
-            status: "failed".to_string(),
-            job_number: 1,
-            workflow_id: "test-workflow".to_string(),
-            started_at: Some(Utc::now() - Duration::minutes(5)),
-            stopped_at: Some(Utc::now() - Duration::minutes(3)),
-            duration: Some(60),
-            executor: ExecutorInfo {
-                executor_type: "docker".to_string(),
-            },
-        };
-
-        let logs = LogModal::load_mock_logs(&job);
-        assert!(!logs.is_empty());
-        assert!(logs.iter().any(|l| l.contains("✗")));
-    }
-
-    #[test]
-    fn test_load_mock_logs_success() {
-        use chrono::{Duration, Utc};
-
-        let job = Job {
-            id: "test".to_string(),
-            name: "test".to_string(),
-            status: "success".to_string(),
-            job_number: 1,
-            workflow_id: "test-workflow".to_string(),
-            started_at: Some(Utc::now() - Duration::minutes(5)),
-            stopped_at: Some(Utc::now() - Duration::minutes(3)),
-            duration: Some(60),
-            executor: ExecutorInfo {
-                executor_type: "docker".to_string(),
-            },
-        };
-
-        let logs = LogModal::load_mock_logs(&job);
-        assert!(!logs.is_empty());
-        assert!(logs.iter().any(|l| l.contains("✓")));
     }
 }

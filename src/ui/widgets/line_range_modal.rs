@@ -1,3 +1,5 @@
+use crate::theme::{BG_PANEL, BORDER_FOCUSED, FG_BRIGHT};
+use crate::ui::widgets::text_input::TextInput;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -6,8 +8,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
-use crate::ui::widgets::text_input::TextInput;
-use crate::theme::{BORDER_FOCUSED, BG_PANEL, FG_BRIGHT};
 
 pub enum LineRangeAction {
     None,
@@ -19,6 +19,12 @@ pub struct LineRangeModal {
     visible: bool,
     input: TextInput,
     total_lines: usize,
+}
+
+impl Default for LineRangeModal {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LineRangeModal {
@@ -40,9 +46,9 @@ impl LineRangeModal {
 
         // Set default to last 1000 lines (or all if fewer than 1000)
         let default_value = if total_lines <= 1000 {
-            "%".to_string()  // All lines
+            "%".to_string() // All lines
         } else {
-            let start = total_lines - 999;  // Last 1000 lines
+            let start = total_lines - 999; // Last 1000 lines
             format!("{},$", start)
         };
         self.input.set_value(default_value);
@@ -132,13 +138,23 @@ impl LineRangeModal {
 
         // Help text
         let help = Paragraph::new(Line::from(vec![
-            Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Enter",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" to copy | "),
-            Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" to cancel | Total lines: "),
             Span::styled(
                 self.total_lines.to_string(),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
         f.render_widget(help, chunks[4]);

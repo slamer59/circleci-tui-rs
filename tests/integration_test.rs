@@ -120,34 +120,6 @@ fn mock_job_response() -> serde_json::Value {
     })
 }
 
-/// Helper to create a job steps response (v1.1 API format)
-fn mock_job_steps_response() -> serde_json::Value {
-    serde_json::json!({
-        "steps": [
-            {
-                "name": "Checkout code",
-                "actions": [
-                    {
-                        "name": "Checkout code",
-                        "status": "success",
-                        "output_url": "https://example.com/logs/step1"
-                    }
-                ]
-            },
-            {
-                "name": "Run tests",
-                "actions": [
-                    {
-                        "name": "Run unit tests",
-                        "status": "success",
-                        "output_url": "https://example.com/logs/step2"
-                    }
-                ]
-            }
-        ]
-    })
-}
-
 // ============================================================================
 // SUCCESS CASE TESTS
 // ============================================================================

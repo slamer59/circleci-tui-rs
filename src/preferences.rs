@@ -43,7 +43,7 @@ pub struct CachedUser {
 }
 
 /// Pipeline filter preferences
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PipelineFilterPrefs {
     /// Owner filter index: 0="All", 1="Mine"
     pub owner_index: usize,
@@ -62,7 +62,7 @@ pub struct PipelineFilterPrefs {
 }
 
 /// Pipeline detail screen (Screen 2) filter preferences
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PipelineDetailFilterPrefs {
     /// Status filter index: 0="All", 1="success", 2="running", 3="failed", 4="pending", 5="blocked"
     pub status_index: usize,
@@ -79,27 +79,6 @@ impl Default for UserPreferences {
             pipeline_filters: PipelineFilterPrefs::default(),
             detail_filters: PipelineDetailFilterPrefs::default(),
             first_run: true,
-        }
-    }
-}
-
-impl Default for PipelineFilterPrefs {
-    fn default() -> Self {
-        Self {
-            owner_index: 0,      // "All"
-            branch: None,        // "All"
-            date_index: 0,       // First option
-            status_index: 0,     // First option
-            search_text: String::new(),
-        }
-    }
-}
-
-impl Default for PipelineDetailFilterPrefs {
-    fn default() -> Self {
-        Self {
-            status_index: 0,    // "All"
-            duration_index: 0,  // "All durations"
         }
     }
 }
@@ -193,19 +172,6 @@ impl PreferencesManager {
     /// Clears the first-run flag
     pub fn clear_first_run(&mut self) {
         self.preferences.first_run = false;
-    }
-
-    /// Gets the configuration file path (for display/debugging purposes)
-    pub fn get_config_path(&self) -> Result<std::path::PathBuf> {
-        let config_dir = confy::get_configuration_file_path(self.app_name, self.config_name)
-            .context("Failed to get configuration file path")?;
-        Ok(config_dir)
-    }
-
-    /// Resets all preferences to defaults (useful for testing or user-requested reset)
-    pub fn reset_to_defaults(&mut self) -> Result<()> {
-        self.preferences = UserPreferences::default();
-        self.save()
     }
 }
 

@@ -7,11 +7,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
-/// Configuration constants
-pub const PREFETCH_AHEAD: usize = 3;
-pub const PREFETCH_BEHIND: usize = 3;
-pub const CACHE_MAX_AGE_DAYS: i64 = 15;
-
 /// Result from a prefetch operation
 pub struct PrefetchResult {
     pub job_number: u32,
@@ -62,8 +57,7 @@ impl PrefetchCoordinator {
             let result_tx = self.result_tx.clone();
 
             let handle = tokio::spawn(async move {
-                prefetch_worker(job_number, job_status, cache_manager, api_client, result_tx)
-                    .await;
+                prefetch_worker(job_number, job_status, cache_manager, api_client, result_tx).await;
             });
 
             self.active_tasks.insert(job_number, handle);
@@ -83,15 +77,10 @@ impl PrefetchCoordinator {
     pub fn poll_results(&mut self) -> Vec<PrefetchResult> {
         let mut results = Vec::new();
 
-        loop {
-            match self.result_rx.try_recv() {
-                Ok(result) => {
-                    // Remove from active tasks
-                    self.active_tasks.remove(&result.job_number);
-                    results.push(result);
-                }
-                Err(_) => break,
-            }
+        while let Ok(result) = self.result_rx.try_recv() {
+            // Remove from active tasks
+            self.active_tasks.remove(&result.job_number);
+            results.push(result);
         }
 
         results

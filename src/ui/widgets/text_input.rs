@@ -76,11 +76,6 @@ impl TextInput {
         }
     }
 
-    /// Check if focused
-    pub fn is_focused(&self) -> bool {
-        self.focused
-    }
-
     /// Handle keyboard input
     ///
     /// Returns `true` if the key was handled, `false` otherwise.
@@ -94,7 +89,12 @@ impl TextInput {
                 // Use character-based indexing to handle UTF-8 safely
                 let char_count = self.value.chars().count();
                 if self.cursor_pos <= char_count {
-                    let byte_pos = self.value.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
+                    let byte_pos = self
+                        .value
+                        .chars()
+                        .take(self.cursor_pos)
+                        .map(|c| c.len_utf8())
+                        .sum();
                     self.value.insert(byte_pos, c);
                     self.cursor_pos += 1;
                 }
@@ -104,7 +104,12 @@ impl TextInput {
                 if self.cursor_pos > 0 {
                     let char_count = self.value.chars().count();
                     if self.cursor_pos <= char_count {
-                        let byte_pos = self.value.chars().take(self.cursor_pos - 1).map(|c| c.len_utf8()).sum();
+                        let byte_pos = self
+                            .value
+                            .chars()
+                            .take(self.cursor_pos - 1)
+                            .map(|c| c.len_utf8())
+                            .sum();
                         self.value.remove(byte_pos);
                         self.cursor_pos -= 1;
                     }
@@ -114,7 +119,12 @@ impl TextInput {
             KeyCode::Delete => {
                 let char_count = self.value.chars().count();
                 if self.cursor_pos < char_count {
-                    let byte_pos = self.value.chars().take(self.cursor_pos).map(|c| c.len_utf8()).sum();
+                    let byte_pos = self
+                        .value
+                        .chars()
+                        .take(self.cursor_pos)
+                        .map(|c| c.len_utf8())
+                        .sum();
                     self.value.remove(byte_pos);
                 }
                 true

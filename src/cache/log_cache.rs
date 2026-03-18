@@ -11,7 +11,6 @@ pub struct LogCacheManager {
 
 pub struct CacheEntry {
     pub logs: Vec<String>,
-    pub metadata: CacheMetadata,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -36,8 +35,7 @@ impl LogCacheManager {
             .join("logs");
 
         // Create cache directory if it doesn't exist
-        fs::create_dir_all(&cache_dir)
-            .context("Failed to create cache directory")?;
+        fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
         Ok(Self { cache_dir })
     }
@@ -53,10 +51,10 @@ impl LogCacheManager {
         }
 
         // Read metadata
-        let meta_content = fs::read_to_string(&meta_path)
-            .context("Failed to read metadata file")?;
-        let metadata: CacheMetadata = serde_json::from_str(&meta_content)
-            .context("Failed to parse metadata")?;
+        let meta_content =
+            fs::read_to_string(&meta_path).context("Failed to read metadata file")?;
+        let metadata: CacheMetadata =
+            serde_json::from_str(&meta_content).context("Failed to parse metadata")?;
 
         // Check if cache is still valid
         if !self.is_cache_valid(&metadata) {
@@ -64,11 +62,10 @@ impl LogCacheManager {
         }
 
         // Read log file
-        let log_content = fs::read_to_string(&log_path)
-            .context("Failed to read log file")?;
+        let log_content = fs::read_to_string(&log_path).context("Failed to read log file")?;
         let logs: Vec<String> = log_content.lines().map(|s| s.to_string()).collect();
 
-        Ok(CacheStatus::Valid(CacheEntry { logs, metadata }))
+        Ok(CacheStatus::Valid(CacheEntry { logs }))
     }
 
     /// Store logs to disk cache
@@ -81,8 +78,7 @@ impl LogCacheManager {
 
         // Write log file
         let log_content = logs.join("\n");
-        fs::write(&log_path, log_content)
-            .context("Failed to write log file")?;
+        fs::write(&log_path, log_content).context("Failed to write log file")?;
 
         // Write metadata file
         let metadata = CacheMetadata {
@@ -90,10 +86,9 @@ impl LogCacheManager {
             job_status: job_status.clone(),
             log_hash,
         };
-        let meta_content = serde_json::to_string_pretty(&metadata)
-            .context("Failed to serialize metadata")?;
-        fs::write(&meta_path, meta_content)
-            .context("Failed to write metadata file")?;
+        let meta_content =
+            serde_json::to_string_pretty(&metadata).context("Failed to serialize metadata")?;
+        fs::write(&meta_path, meta_content).context("Failed to write metadata file")?;
 
         Ok(())
     }
@@ -103,8 +98,7 @@ impl LogCacheManager {
         let now = Utc::now();
         let max_age_days = 15;
 
-        let entries = fs::read_dir(&self.cache_dir)
-            .context("Failed to read cache directory")?;
+        let entries = fs::read_dir(&self.cache_dir).context("Failed to read cache directory")?;
 
         for entry in entries {
             let entry = entry.context("Failed to read directory entry")?;
@@ -122,7 +116,8 @@ impl LogCacheManager {
 
                     if age_days > max_age_days {
                         // Delete both .meta and .log files
-                        let job_number = path.file_stem()
+                        let job_number = path
+                            .file_stem()
                             .and_then(|s| s.to_str())
                             .and_then(|s| s.parse::<u32>().ok());
 

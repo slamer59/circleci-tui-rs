@@ -141,16 +141,6 @@ impl ConfirmModal {
 
         f.render_widget(buttons_paragraph, area);
     }
-
-    /// Check if the modal is visible
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    /// Hide the modal
-    pub fn hide(&mut self) {
-        self.visible = false;
-    }
 }
 
 /// Helper function to create a centered rect

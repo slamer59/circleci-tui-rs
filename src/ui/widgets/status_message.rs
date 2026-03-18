@@ -16,11 +16,11 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageLevel {
     /// Success message (green)
-    Success,
+    _Success,
     /// Info message (blue/accent)
     Info,
     /// Error message (red/pink)
-    Error,
+    _Error,
 }
 
 /// Status message with auto-hide functionality
@@ -46,19 +46,9 @@ impl StatusMessage {
         }
     }
 
-    /// Create a success message
-    pub fn success(text: impl Into<String>) -> Self {
-        Self::new(text, MessageLevel::Success)
-    }
-
     /// Create an info message
     pub fn info(text: impl Into<String>) -> Self {
         Self::new(text, MessageLevel::Info)
-    }
-
-    /// Create an error message
-    pub fn error(text: impl Into<String>) -> Self {
-        Self::new(text, MessageLevel::Error)
     }
 
     /// Check if the message should be hidden (expired)
@@ -66,17 +56,12 @@ impl StatusMessage {
         self.created_at.elapsed() >= self.duration
     }
 
-    /// Get remaining time before auto-hide
-    pub fn remaining_time(&self) -> Duration {
-        self.duration.saturating_sub(self.created_at.elapsed())
-    }
-
     /// Render the status message as a paragraph
     pub fn render(&self) -> Paragraph<'_> {
         let (icon, color) = match self.level {
-            MessageLevel::Success => ("✓", SUCCESS),
+            MessageLevel::_Success => ("✓", SUCCESS),
             MessageLevel::Info => ("ℹ", ACCENT),
-            MessageLevel::Error => ("✗", FAILED_TEXT),
+            MessageLevel::_Error => ("✗", FAILED_TEXT),
         };
 
         let line = Line::from(vec![
@@ -92,12 +77,6 @@ impl StatusMessage {
 
         Paragraph::new(line).alignment(Alignment::Center)
     }
-
-    /// Set custom duration before auto-hide
-    pub fn with_duration(mut self, duration: Duration) -> Self {
-        self.duration = duration;
-        self
-    }
 }
 
 #[cfg(test)]
@@ -108,20 +87,20 @@ mod tests {
     fn test_status_message_creation() {
         let msg = StatusMessage::success("Operation successful");
         assert_eq!(msg.text, "Operation successful");
-        assert_eq!(msg.level, MessageLevel::Success);
+        assert_eq!(msg.level, MessageLevel::_Success);
         assert!(!msg.is_expired());
     }
 
     #[test]
     fn test_message_levels() {
         let success = StatusMessage::success("Success");
-        assert_eq!(success.level, MessageLevel::Success);
+        assert_eq!(success.level, MessageLevel::_Success);
 
         let info = StatusMessage::info("Info");
         assert_eq!(info.level, MessageLevel::Info);
 
         let error = StatusMessage::error("Error");
-        assert_eq!(error.level, MessageLevel::Error);
+        assert_eq!(error.level, MessageLevel::_Error);
     }
 
     #[test]

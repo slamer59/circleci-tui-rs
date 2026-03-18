@@ -7,7 +7,6 @@ use crate::theme::{
     get_status_color, get_status_icon, ACCENT, BG_PANEL, BORDER_FOCUSED, FG_BRIGHT, FG_DIM,
     FG_PRIMARY, SECONDARY,
 };
-use crate::ui::utils::{truncate_string, truncate_string_left};
 use crate::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
 use crate::ui::widgets::spinner::Spinner;
 use crate::ui::widgets::text_input::TextInput;
@@ -67,14 +66,22 @@ impl PipelineScreen {
         screen.authenticated_user_name = authenticated_user_name;
 
         // Apply saved filter selections
-        screen.faceted_search.set_facet_selection(0, prefs.owner_index);
-        screen.faceted_search.set_facet_selection(2, prefs.date_index);
-        screen.faceted_search.set_facet_selection(3, prefs.status_index);
+        screen
+            .faceted_search
+            .set_facet_selection(0, prefs.owner_index);
+        screen
+            .faceted_search
+            .set_facet_selection(2, prefs.date_index);
+        screen
+            .faceted_search
+            .set_facet_selection(3, prefs.status_index);
 
         // Apply saved branch (add to options if doesn't exist)
         if let Some(ref branch) = prefs.branch {
             // Add branch to options and select it (creates if doesn't exist)
-            screen.faceted_search.add_and_select_option(1, branch.clone());
+            screen
+                .faceted_search
+                .add_and_select_option(1, branch.clone());
         }
 
         // Apply saved search text
@@ -190,14 +197,18 @@ impl PipelineScreen {
         branch_options.extend(branches);
 
         // Save current selection before updating options
-        let current_selection = self.faceted_search.get_filter_value(1).map(|s| s.to_string());
+        let current_selection = self
+            .faceted_search
+            .get_filter_value(1)
+            .map(|s| s.to_string());
 
         // Update facet 1 (branch filter) with new options
         self.faceted_search.update_facet_options(1, branch_options);
 
         // Restore selection if it still exists in new options
         if let Some(selected_branch) = current_selection {
-            self.faceted_search.set_facet_selection_by_value(1, &selected_branch);
+            self.faceted_search
+                .set_facet_selection_by_value(1, &selected_branch);
         }
     }
 
@@ -284,7 +295,10 @@ impl PipelineScreen {
                     pipeline_num.contains(&search_text)
                         || p.vcs.branch.to_lowercase().contains(&search_text)
                         || p.vcs.commit_subject.to_lowercase().contains(&search_text)
-                        || p.vcs.commit_author_name.to_lowercase().contains(&search_text)
+                        || p.vcs
+                            .commit_author_name
+                            .to_lowercase()
+                            .contains(&search_text)
                 };
 
                 // NOTE: Owner and Branch filters are applied server-side by API
@@ -421,7 +435,8 @@ impl PipelineScreen {
     /// Render unified filters panel containing search input and filter buttons
     fn render_filters_panel(&mut self, f: &mut Frame, area: Rect) {
         // Determine border style based on focus
-        let (border_style, border_type, title_style) = if self.search_focused || self.filter_active {
+        let (border_style, border_type, title_style) = if self.search_focused || self.filter_active
+        {
             (
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 BorderType::Double,
@@ -476,19 +491,20 @@ impl PipelineScreen {
         };
 
         // Determine border style - bold when list is focused (not in search/filter mode)
-        let (border_style, border_type, title_style) = if !self.search_focused && !self.filter_active {
-            (
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                BorderType::Double,
-                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
-            )
-        } else {
-            (
-                Style::default().fg(ACCENT),
-                BorderType::Rounded,
-                Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
-            )
-        };
+        let (border_style, border_type, title_style) =
+            if !self.search_focused && !self.filter_active {
+                (
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    BorderType::Double,
+                    Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                (
+                    Style::default().fg(ACCENT),
+                    BorderType::Rounded,
+                    Style::default().fg(FG_BRIGHT).add_modifier(Modifier::BOLD),
+                )
+            };
 
         let block = Block::default()
             .title(title)
@@ -599,10 +615,10 @@ impl PipelineScreen {
 
             // Define column widths: fixed sizes for STATUS/STAGES/DURATION, WORKFLOW fills remaining space
             let widths = [
-                Constraint::Length(12),   // STATUS: icon + time (fixed)
-                Constraint::Fill(1),      // WORKFLOW: expand to fill available space
-                Constraint::Length(8),    // STAGES: stage icons (compact)
-                Constraint::Length(10),   // DURATION: time display (compact)
+                Constraint::Length(12), // STATUS: icon + time (fixed)
+                Constraint::Fill(1),    // WORKFLOW: expand to fill available space
+                Constraint::Length(8),  // STAGES: stage icons (compact)
+                Constraint::Length(10), // DURATION: time display (compact)
             ];
 
             // Create header row
@@ -650,10 +666,10 @@ impl PipelineScreen {
             // Normal rendering
             // Define column widths: fixed sizes for STATUS/STAGES/DURATION, WORKFLOW fills remaining space
             let widths = [
-                Constraint::Length(12),   // STATUS: icon + time (fixed)
-                Constraint::Fill(1),      // WORKFLOW: expand to fill available space
-                Constraint::Length(8),    // STAGES: stage icons (compact)
-                Constraint::Length(10),   // DURATION: time display (compact)
+                Constraint::Length(12), // STATUS: icon + time (fixed)
+                Constraint::Fill(1),    // WORKFLOW: expand to fill available space
+                Constraint::Length(8),  // STAGES: stage icons (compact)
+                Constraint::Length(10), // DURATION: time display (compact)
             ];
 
             // Create header row
@@ -1063,10 +1079,7 @@ fn create_pipeline_row<'a>(
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
     } else {
-        Line::from(Span::styled(
-            metadata_text,
-            Style::default().fg(FG_DIM),
-        ))
+        Line::from(Span::styled(metadata_text, Style::default().fg(FG_DIM)))
     };
     let workflow_cell = Cell::from(Text::from(vec![workflow_line1, workflow_line2]));
 
@@ -1095,38 +1108,6 @@ fn create_pipeline_row<'a>(
     let duration_cell = Cell::from(Text::from(vec![duration_line1, duration_line2]));
 
     Row::new(vec![status_cell, workflow_cell, stages_cell, duration_cell]).height(2)
-}
-
-/// Format timestamp with date context for clarity
-/// Examples: "Today 09:49", "Yesterday 17:49", "Mon 16:00", "Mar 1"
-fn format_timestamp_with_date(timestamp: &chrono::DateTime<chrono::Utc>) -> String {
-    use chrono::{Local, Timelike, Datelike};
-
-    // Convert to local time for display
-    let local_time = timestamp.with_timezone(&Local);
-    let now = Local::now();
-
-    // Calculate days difference
-    let days_diff = (now.date_naive() - local_time.date_naive()).num_days();
-
-    match days_diff {
-        0 => {
-            // Today: show "Today HH:MM"
-            format!("Tdy {}", local_time.format("%H:%M"))
-        }
-        1 => {
-            // Yesterday: show "Yesterday HH:MM"
-            format!("Ydy {}", local_time.format("%H:%M"))
-        }
-        2..=6 => {
-            // This week: show "Mon HH:MM"
-            format!("{}", local_time.format("%a %H:%M"))
-        }
-        _ => {
-            // Older: show "Mar 1" or "Jan 15"
-            format!("{}", local_time.format("%b %-d"))
-        }
-    }
 }
 
 /// Format time ago (e.g., "2h ago", "45m ago")
@@ -1192,5 +1173,4 @@ mod tests {
         let pipeline = screen.get_selected_pipeline();
         assert!(pipeline.is_some());
     }
-
 }

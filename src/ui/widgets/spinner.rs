@@ -8,7 +8,7 @@ use ratatui::{
     layout::Alignment,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 use std::time::{Duration, Instant};
 
@@ -43,12 +43,6 @@ impl Spinner {
             created_at: now,
             show_elapsed: false,
         }
-    }
-
-    /// Enable showing elapsed time
-    pub fn with_elapsed_time(mut self) -> Self {
-        self.show_elapsed = true;
-        self
     }
 
     /// Update the spinner animation
@@ -105,28 +99,6 @@ impl Spinner {
 
         let line = Line::from(spans);
         Paragraph::new(line).alignment(Alignment::Center)
-    }
-
-    /// Render the spinner with a border block
-    ///
-    /// Returns a Paragraph widget with a border block around it.
-    pub fn render_with_block(&self, title: impl Into<String>) -> Paragraph<'_> {
-        let line = Line::from(vec![
-            Span::styled(
-                format!("{} ", self.current_frame()),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(&self.message, Style::default().fg(FG_PRIMARY)),
-        ]);
-
-        let block = Block::default()
-            .title(title.into())
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(FG_DIM));
-
-        Paragraph::new(line)
-            .block(block)
-            .alignment(Alignment::Center)
     }
 }
 

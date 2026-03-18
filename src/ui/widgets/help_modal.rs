@@ -82,9 +82,8 @@ impl HelpModal {
         f.render_widget(block, modal_area);
 
         // Create help content
-        let mut help_lines = vec![
-        ];
-        
+        let mut help_lines = vec![];
+
         // === LOGO ASCII (easy to modify - see LOGO_LINES constant at top) ===
         for line in LOGO_LINES.iter() {
             help_lines.push(Line::from(*line).alignment(Alignment::Center));
@@ -93,13 +92,15 @@ impl HelpModal {
         help_lines.push(
             Line::from(Span::styled(
                 "CircleCI TUI",
-                Style::default().fg(FG_PRIMARY).add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                Style::default()
+                    .fg(FG_PRIMARY)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             ))
-            .alignment(Alignment::Center)
+            .alignment(Alignment::Center),
         );
         help_lines.push(Line::from(""));
         // === FIN LOGO ===
-        
+
         help_lines.extend(vec![
             Line::from(Span::styled(
                 "GLOBAL SHORTCUTS",
@@ -266,7 +267,10 @@ impl HelpModal {
                     "  y",
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("           Copy job logs (opens range selector)", Style::default().fg(FG_PRIMARY)),
+                Span::styled(
+                    "           Copy job logs (opens range selector)",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(vec![
                 Span::styled(
@@ -274,7 +278,6 @@ impl HelpModal {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("           SSH into job", Style::default().fg(FG_PRIMARY)),
-
             ]),
             Line::from(""),
             // Modals
@@ -323,16 +326,6 @@ impl HelpModal {
             .alignment(Alignment::Left);
 
         f.render_widget(help_paragraph, inner_area);
-    }
-
-    /// Check if the modal is visible
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    /// Hide the modal
-    pub fn hide(&mut self) {
-        self.visible = false;
     }
 }
 

@@ -156,7 +156,10 @@ async fn test_complete_pipeline_to_jobs_flow() {
 
     // Execute the full workflow
     // Step 1: Get pipelines
-    let pipelines = client.get_pipelines(10).await.expect("Failed to get pipelines");
+    let pipelines = client
+        .get_pipelines(10)
+        .await
+        .expect("Failed to get pipelines");
     pipelines_mock.assert();
 
     assert_eq!(pipelines.len(), 2);

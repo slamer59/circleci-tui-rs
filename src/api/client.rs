@@ -69,7 +69,6 @@ struct VcsResponse {
 #[derive(Debug, Deserialize)]
 struct CommitResponse {
     subject: Option<String>,
-    body: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,13 +81,11 @@ struct TriggerResponse {
 #[derive(Debug, Deserialize)]
 struct ActorResponse {
     login: Option<String>,
-    avatar_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct WorkflowResponse {
     items: Vec<WorkflowItem>,
-    next_page_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,54 +170,6 @@ impl CircleCIClient {
             base_url: "https://circleci.com/api/v2".to_string(),
             project_slug,
         })
-    }
-
-    /// Create a new CircleCI API client with custom base URL
-    ///
-    /// This constructor is primarily intended for testing purposes,
-    /// allowing tests to point at a mock server instead of the real CircleCI API.
-    ///
-    /// # Arguments
-    /// * `token` - CircleCI API token
-    /// * `project_slug` - Project slug in format "gh/org/repo" or "bb/org/repo"
-    /// * `base_url` - Custom base URL for the API (e.g., mock server URL)
-    pub fn new_with_base_url(
-        token: String,
-        project_slug: String,
-        base_url: String,
-    ) -> Result<Self, ApiError> {
-        // Build headers
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "Circle-Token",
-            HeaderValue::from_str(&token)
-                .map_err(|e| ApiError::Network(format!("Invalid token: {}", e)))?,
-        );
-        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-
-        // Build reqwest client with timeout
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e| ApiError::Network(format!("Failed to build HTTP client: {}", e)))?;
-
-        Ok(Self {
-            client,
-            base_url,
-            project_slug,
-        })
-    }
-
-    /// Fetch pipelines for the project
-    ///
-    /// # Arguments
-    /// * `limit` - Maximum number of pipelines to fetch (default: 50)
-    ///
-    /// # Returns
-    /// List of pipelines, most recent first
-    pub async fn get_pipelines(&self, limit: usize) -> Result<Vec<Pipeline>, ApiError> {
-        self.get_pipelines_filtered(limit, None, false).await
     }
 
     /// Get pipelines for the project with optional filters (server-side filtering)
@@ -469,34 +418,6 @@ impl CircleCIClient {
         Ok((jobs, job_response.next_page_token))
     }
 
-    /// Rerun a workflow
-    ///
-    /// # Arguments
-    /// * `workflow_id` - Workflow ID to rerun
-    ///
-    /// # Returns
-    /// Result indicating success or failure
-    pub async fn rerun_workflow(&self, workflow_id: &str) -> Result<(), ApiError> {
-        let url = format!("{}/workflow/{}/rerun", self.base_url, workflow_id);
-
-        // Build request payload
-        let payload = serde_json::json!({
-            "from_failed": false
-        });
-
-        // Make API request
-        let response = self.client.post(&url).json(&payload).send().await?;
-
-        // Check for errors - 202 Accepted is success for rerun
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
-            return Err(ApiError::Http(status, body));
-        }
-
-        Ok(())
-    }
-
     /// Fetch steps for a job using v1.1 API
     ///
     /// The v2 API doesn't include step information, so we need to use the v1.1 API.
@@ -575,7 +496,6 @@ impl CircleCIClient {
                     status: map_status(&status),
                     output_url,
                     index,
-                    log_output: Vec::new(), // Will be populated when fetching logs
                 });
             }
 

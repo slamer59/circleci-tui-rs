@@ -52,7 +52,12 @@ impl PowerlineBar {
     }
 
     /// Set a temporary notification message
-    pub fn set_notification(&mut self, message: String, level: NotificationLevel, duration: Duration) {
+    pub fn set_notification(
+        &mut self,
+        message: String,
+        level: NotificationLevel,
+        duration: Duration,
+    ) {
         self.content = PowerlineContent::Notification {
             message,
             level,
@@ -64,11 +69,6 @@ impl PowerlineBar {
     /// Set loading state
     pub fn set_loading(&mut self, message: String) {
         self.content = PowerlineContent::Loading { message };
-    }
-
-    /// Clear content to empty state
-    pub fn clear(&mut self) {
-        self.content = PowerlineContent::Empty;
     }
 
     /// Update powerline state - clears expired notifications
@@ -144,7 +144,6 @@ impl PowerlineBar {
 
         Paragraph::new(Line::from(spans)).style(Style::default().bg(SUCCESS).fg(BG_DARK))
     }
-
 }
 
 impl Default for PowerlineBar {

@@ -77,10 +77,7 @@ fn main() -> Result<()> {
         "  Owner index: {}",
         prefs_reloaded.pipeline_filters.owner_index
     );
-    println!(
-        "  Branch: {:?}",
-        prefs_reloaded.pipeline_filters.branch
-    );
+    println!("  Branch: {:?}", prefs_reloaded.pipeline_filters.branch);
     println!(
         "  Search text: '{}'",
         prefs_reloaded.pipeline_filters.search_text
