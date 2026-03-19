@@ -299,6 +299,10 @@ impl App {
                         }
                     }
                 }
+                ModalAction::CopyStepLogs => {
+                    self.status_message =
+                        Some(StatusMessage::info("Step logs copied to clipboard"));
+                }
                 ModalAction::None => {
                     // Continue showing modal
                 }

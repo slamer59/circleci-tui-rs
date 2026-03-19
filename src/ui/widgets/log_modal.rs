@@ -28,6 +28,8 @@ pub enum ModalAction {
     Close,
     /// Rerun the job
     Rerun,
+    /// Copy selected step's logs to clipboard
+    CopyStepLogs,
 }
 
 /// A single step within a job's log output
@@ -244,11 +246,6 @@ impl LogModal {
             }
         }
         row
-    }
-
-    /// Check if any step is currently expanded
-    fn any_step_expanded(&self) -> bool {
-        self.steps.iter().any(|s| s.expanded)
     }
 
     /// Format duration_secs into a human-readable string
@@ -734,7 +731,6 @@ impl LogModal {
             0
         };
 
-        let has_expanded = self.any_step_expanded();
         let selected_expanded = self
             .steps
             .get(self.selected_step)
@@ -744,12 +740,6 @@ impl LogModal {
             " Collapse  "
         } else {
             " Expand  "
-        };
-
-        let arrow_label = if has_expanded {
-            " Scroll  "
-        } else {
-            " Steps  "
         };
 
         let footer_text = vec![Line::from(vec![
@@ -767,7 +757,12 @@ impl LogModal {
                 "[↑↓]",
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(arrow_label, Style::default().fg(FG_DIM)),
+            Span::styled(" Steps  ", Style::default().fg(FG_DIM)),
+            Span::styled(
+                "[c]",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Copy  ", Style::default().fg(FG_DIM)),
             Span::styled(
                 "[r]",
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
@@ -795,21 +790,17 @@ impl LogModal {
                 self.toggle_selected_step();
                 ModalAction::None
             }
+            KeyCode::Char('c') | KeyCode::Char('y') => {
+                self.copy_selected_step_logs();
+                ModalAction::CopyStepLogs
+            }
             KeyCode::Up | KeyCode::Char('k') => {
-                if self.any_step_expanded() {
-                    self.scroll_up();
-                } else {
-                    self.move_selected_step_up();
-                }
+                self.move_selected_step_up();
                 self.auto_scroll = false;
                 ModalAction::None
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.any_step_expanded() {
-                    self.scroll_down();
-                } else {
-                    self.move_selected_step_down();
-                }
+                self.move_selected_step_down();
                 ModalAction::None
             }
             KeyCode::PageUp => {
@@ -880,6 +871,41 @@ impl LogModal {
             self.scroll_offset = header_row;
         } else if header_row >= self.scroll_offset + visible_height {
             self.scroll_offset = header_row.saturating_sub(visible_height - 1);
+        }
+    }
+
+    /// Copy selected step's logs to system clipboard
+    fn copy_selected_step_logs(&self) {
+        if let Some(step) = self.steps.get(self.selected_step) {
+            let text = step.logs.join("\n");
+            let _ = Self::copy_to_clipboard(&text);
+        }
+    }
+
+    /// Copy text to system clipboard
+    fn copy_to_clipboard(text: &str) -> Result<(), String> {
+        use arboard::Clipboard;
+
+        let mut clipboard =
+            Clipboard::new().map_err(|e| format!("Clipboard unavailable: {}", e))?;
+
+        #[cfg(target_os = "linux")]
+        {
+            use arboard::SetExtLinux;
+            use std::time::{Duration, Instant};
+
+            clipboard
+                .set()
+                .wait_until(Instant::now() + Duration::from_millis(300))
+                .text(text.to_owned())
+                .map_err(|e| format!("Failed to copy: {}", e))
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            clipboard
+                .set_text(text)
+                .map_err(|e| format!("Failed to copy: {}", e))
         }
     }
 
