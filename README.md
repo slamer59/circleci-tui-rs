@@ -40,7 +40,7 @@ cargo install --git https://github.com/slamer59/circleci-tui-rs --branch main
 
 After installation, run:
 ```bash
-circleci-tui-rs
+circleci-tui
 ```
 
 ### Option 2: Clone and build locally

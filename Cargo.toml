@@ -50,5 +50,9 @@ dirs = "5.0"
 # tracing = "0.1"
 # tracing-subscriber = "0.3"
 
+[[bin]]
+name = "circleci-tui"
+path = "src/main.rs"
+
 [dev-dependencies]
 mockito = "1.2"
