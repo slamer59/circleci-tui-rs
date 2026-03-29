@@ -14,8 +14,8 @@ readme = "README.md"
 
 [dependencies]
 # TUI
-ratatui = "0.28"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 
 # Error handling (needed for Phase 1)
 anyhow = "1.0"
@@ -26,7 +26,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 
 # HTTP client
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
@@ -42,7 +42,7 @@ chrono = { version = "0.4.31", default-features = false, features = ["serde", "c
 url = "2.3"
 ansi-to-tui = "8.0"
 ratatui-core = "0.1"
-git2 = "0.18"
+git2 = "0.20"
 arboard = "3.4"
 dirs = "5.0"
 
