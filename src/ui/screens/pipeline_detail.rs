@@ -479,7 +479,7 @@ impl PipelineDetailScreen {
                 }
                 PipelineDetailAction::None
             }
-            KeyCode::Char('y') => {
+            KeyCode::Char('c') => {
                 // Show line range input modal
                 if self.focus == PanelFocus::Jobs {
                     if let Some(job) = self.get_selected_job() {
@@ -1195,7 +1195,7 @@ impl PipelineDetailScreen {
 
         // Add [y]Copy when Jobs panel is focused and a job is selected
         if self.focus == PanelFocus::Jobs && self.selected_job_index.is_some() {
-            footer_items.push(Span::styled("[y]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled("[c]", Style::default().fg(ACCENT)));
             footer_items.push(Span::styled(" Copy  ", Style::default().fg(FG_PRIMARY)));
         }
 
