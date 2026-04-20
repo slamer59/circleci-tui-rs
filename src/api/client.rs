@@ -541,6 +541,10 @@ impl CircleCIClient {
     ///
     /// # Returns
     /// List of log lines
+    pub async fn fetch_log_output_pub(&self, output_url: &str) -> Result<Vec<String>, ApiError> {
+        self.fetch_log_output(output_url).await
+    }
+
     async fn fetch_log_output(&self, output_url: &str) -> Result<Vec<String>, ApiError> {
         // Fetch log output (no auth needed for S3 URLs)
         let response = reqwest::get(output_url)

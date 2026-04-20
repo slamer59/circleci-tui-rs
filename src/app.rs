@@ -998,7 +998,7 @@ impl App {
             }
 
             let delete_instruction = format!(
-                "For each job fixed, use the Claude CLI (`claude`) to create a commit if relevant. \
+                "For each job fixed, amend the current commit. \
 When all jobs are fixed, always ask the user for permission before running: `rm -rf ci-failures-{}`",
                 timestamp
             );
