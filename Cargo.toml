@@ -45,6 +45,7 @@ ratatui-core = "0.1"
 git2 = "0.18"
 arboard = "3.4"
 dirs = "5.0"
+futures = "0.3"
 
 # Logging (optional, for debugging)
 # tracing = "0.1"

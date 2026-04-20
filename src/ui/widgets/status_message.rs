@@ -51,6 +51,20 @@ impl StatusMessage {
         Self::new(text, MessageLevel::Info)
     }
 
+    /// Create a persistent info message that stays until explicitly replaced
+    pub fn pending(text: impl Into<String>) -> Self {
+        let mut msg = Self::new(text, MessageLevel::Info);
+        msg.duration = Duration::from_secs(300);
+        msg
+    }
+
+    /// Create an error message
+    pub fn error(text: impl Into<String>) -> Self {
+        let mut msg = Self::new(text, MessageLevel::_Error);
+        msg.duration = Duration::from_secs(10);
+        msg
+    }
+
     /// Check if the message should be hidden (expired)
     pub fn is_expired(&self) -> bool {
         self.created_at.elapsed() >= self.duration

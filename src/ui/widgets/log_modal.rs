@@ -20,7 +20,7 @@ use ratatui::{
 use std::time::Instant;
 
 /// Actions that can be triggered from the log modal
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalAction {
     /// No action taken
     None,
@@ -880,6 +880,34 @@ impl LogModal {
             let text = step.logs.join("\n");
             let _ = Self::copy_to_clipboard(&text);
         }
+    }
+
+    pub fn strip_ansi_pub(s: &str) -> String {
+        Self::strip_ansi(s)
+    }
+
+    fn strip_ansi(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    for ch in chars.by_ref() {
+                        if ch.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    pub fn copy_to_clipboard_pub(text: &str) -> Result<(), String> {
+        Self::copy_to_clipboard(text)
     }
 
     /// Copy text to system clipboard

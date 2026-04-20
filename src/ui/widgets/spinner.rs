@@ -64,6 +64,11 @@ impl Spinner {
         SPINNER_FRAMES[self.current_frame]
     }
 
+    /// Get the current message
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     /// Update the message
     pub fn set_message(&mut self, message: impl Into<String>) {
         self.message = message.into();

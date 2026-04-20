@@ -57,6 +57,8 @@ pub enum PipelineDetailAction {
     LoadJobs(String),
     /// Copy logs for the specified job number
     CopyLogs(u32),
+    /// Fetch and save/copy logs for all failed jobs in the current workflow
+    FetchFailedJobsLogs(Vec<(u32, String)>),
 }
 
 /// Pipeline detail screen with workflow tree and jobs list
@@ -448,6 +450,26 @@ impl PipelineDetailScreen {
                     self.focus = PanelFocus::Jobs;
                 } else {
                     self.focus = PanelFocus::Filters;
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Char('F') => {
+                match self.focus {
+                    PanelFocus::Jobs | PanelFocus::Workflows => {
+                        let failed: Vec<(u32, String)> = self
+                            .jobs
+                            .iter()
+                            .filter(|j| {
+                                matches!(j.status.as_str(), "failed" | "error" | "failure")
+                                    && j.job_number > 0
+                            })
+                            .map(|j| (j.job_number, j.name.clone()))
+                            .collect();
+                        if !failed.is_empty() {
+                            return PipelineDetailAction::FetchFailedJobsLogs(failed);
+                        }
+                    }
+                    PanelFocus::Filters => {}
                 }
                 PipelineDetailAction::None
             }
@@ -1197,6 +1219,18 @@ impl PipelineDetailScreen {
         if self.focus == PanelFocus::Jobs && self.selected_job_index.is_some() {
             footer_items.push(Span::styled("[c]", Style::default().fg(ACCENT)));
             footer_items.push(Span::styled(" Copy  ", Style::default().fg(FG_PRIMARY)));
+        }
+
+        // Add [F] Save failing when there are failed jobs (jobs or workflows panel)
+        let has_failed = self.jobs.iter().any(|j| {
+            matches!(j.status.as_str(), "failed" | "error" | "failure") && j.job_number > 0
+        });
+        if has_failed && matches!(self.focus, PanelFocus::Jobs | PanelFocus::Workflows) {
+            footer_items.push(Span::styled("[F]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled(
+                " Save failing  ",
+                Style::default().fg(FG_PRIMARY),
+            ));
         }
 
         footer_items.push(Span::styled("[f]", Style::default().fg(ACCENT)));

@@ -57,6 +57,8 @@ pub enum BgTaskResult {
         job_status: Option<String>,
     },
     PowerlineLogsError(anyhow::Error),
+    FailedJobsLogsReady(String),
+    FailedJobsLogsWrittenToFile(std::path::PathBuf),
 }
 
 /// Application screens
@@ -112,6 +114,10 @@ pub struct App {
     pub bg_sender: mpsc::UnboundedSender<BgTaskResult>,
     /// Channel receiver for background task results
     pub bg_receiver: mpsc::UnboundedReceiver<BgTaskResult>,
+    /// Spinner for long-running fetch operations
+    pub fetch_spinner: crate::ui::widgets::spinner::Spinner,
+    /// Whether a fetch operation is in progress (drives spinner)
+    pub is_fetching: bool,
 }
 
 impl App {
@@ -217,6 +223,8 @@ impl App {
             prefetch_coordinator,
             bg_sender,
             bg_receiver,
+            fetch_spinner: crate::ui::widgets::spinner::Spinner::new("Fetching..."),
+            is_fetching: false,
         })
     }
 
@@ -429,6 +437,17 @@ impl App {
                             // we just need to check if there's a pending log fetch
                             // This will be checked in the async processing loop below
                         }
+                        PipelineDetailAction::FetchFailedJobsLogs(failed_jobs) => {
+                            self.is_fetching = true;
+                            self.fetch_spinner = crate::ui::widgets::spinner::Spinner::new(
+                                format!("Fetching logs for {} failed job(s)...", failed_jobs.len()),
+                            );
+                            self.status_message = Some(StatusMessage::pending(format!(
+                                "⠋ Fetching logs for {} failed job(s)...",
+                                failed_jobs.len()
+                            )));
+                            self.spawn_failed_jobs_log_fetch(failed_jobs);
+                        }
                         PipelineDetailAction::None => {
                             // No action needed
                         }
@@ -451,36 +470,32 @@ impl App {
             }
         }
 
-        // Split layout: status bar (if present) + main content
+        // Split layout: main content + status bar (if present) at bottom
         let chunks = if self.status_message.is_some() {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(1), // Status bar
                     Constraint::Min(0),    // Main content
+                    Constraint::Length(1), // Status bar
                 ])
                 .split(area)
         } else {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(0), // No status bar
                     Constraint::Min(0),    // Main content
+                    Constraint::Length(0), // No status bar
                 ])
                 .split(area)
         };
 
-        // Render status message at top if present
-        if let Some(ref msg) = self.status_message {
-            f.render_widget(msg.render(), chunks[0]);
-        }
-
         // Determine the main content area
-        let main_area = if self.status_message.is_some() {
-            chunks[1]
-        } else {
-            area
-        };
+        let main_area = chunks[0];
+
+        // Render status message at bottom if present
+        if let Some(ref msg) = self.status_message {
+            f.render_widget(msg.render(), chunks[1]);
+        }
 
         // Render base screen
         match &self.current_screen {
@@ -876,8 +891,181 @@ impl App {
         });
     }
 
+    pub fn spawn_failed_jobs_log_fetch(&mut self, failed_jobs: Vec<(u32, String)>) {
+        use crate::ui::widgets::log_modal::LogModal;
+        let client = Arc::clone(&self.api_client);
+        let tx = self.bg_sender.clone();
+        let cwd = std::env::current_dir().ok();
+        tokio::spawn(async move {
+            use chrono::Local;
+            let timestamp = Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
+
+            struct JobResult {
+                name: String,
+                reproduce: String,
+                summary_logs: String,
+                full_logs: String,
+                full_filename: String,
+            }
+
+            // Fetch all jobs in parallel
+            let fetch_tasks: Vec<_> = failed_jobs
+                .iter()
+                .map(|(job_number, job_name)| {
+                    let client = Arc::clone(&client);
+                    let job_number = *job_number;
+                    let job_name = job_name.clone();
+                    tokio::spawn(async move {
+                        // Get steps to find failed step's command (first log line of failed action)
+                        let reproduce = async {
+                            let steps = client.get_job_steps(job_number).await.ok()?;
+                            let failed_step = steps.iter().find(|s| s.status == "failed")?;
+                            let output_url = failed_step.actions.iter()
+                                .find(|a| a.status == "failed")
+                                .and_then(|a| a.output_url.as_ref())?;
+                            let lines = client.fetch_log_output_pub(output_url).await.ok()?;
+                            lines.first().map(|l| LogModal::strip_ansi_pub(l).trim().to_string())
+                        }.await.unwrap_or_default();
+
+                        let fetch = tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            client.stream_job_log(job_number),
+                        )
+                        .await;
+                        let logs = match fetch {
+                            Ok(Ok(l)) => l,
+                            Ok(Err(e)) => vec![format!("(fetch error: {})", e)],
+                            Err(_) => vec!["(timed out)".to_string()],
+                        };
+                        (job_name, reproduce, logs)
+                    })
+                })
+                .collect();
+
+            let fetched: Vec<(String, String, Vec<String>)> = futures::future::join_all(fetch_tasks)
+                .await
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .collect();
+
+            let mut results: Vec<JobResult> = Vec::new();
+
+            for (job_name, reproduce, logs) in fetched {
+
+                let clean_lines: Vec<String> =
+                    logs.iter().map(|l| LogModal::strip_ansi_pub(l)).collect();
+
+                let summary_logs = clean_lines
+                    .iter()
+                    .rev()
+                    .take(150)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let full_logs = clean_lines.join("\n");
+                let safe_name = job_name.replace('/', "-");
+                let full_filename = format!("{}.md", safe_name);
+
+                results.push(JobResult {
+                    name: job_name.clone(),
+                    reproduce,
+                    summary_logs,
+                    full_logs,
+                    full_filename,
+                });
+            }
+
+            // Build summary file
+            let _summary_filename = "summary.md".to_string();
+            // Top-level checklist
+            let checklist: String = results
+                .iter()
+                .map(|r| format!("- [ ] fix {}", r.name))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // Per-job detail sections
+            let mut detail_sections: Vec<String> = Vec::new();
+            for r in &results {
+                detail_sections.push(format!(
+                    "## {}\n**Command:** `{}`  **Full log:** `{}`\n\n```\n{}\n```",
+                    r.name, r.reproduce, r.full_filename, r.summary_logs
+                ));
+            }
+
+            let delete_instruction = format!(
+                "For each job fixed, use the Claude CLI (`claude`) to create a commit if relevant. \
+When all jobs are fixed, always ask the user for permission before running: `rm -rf ci-failures-{}`",
+                timestamp
+            );
+
+            let prompt = format!(
+                "You are a senior engineer. For each failing job below, identify the root cause \
+and provide a concrete fix (file path, function name, exact code change). \
+Only load the full log file if the summary is not enough to diagnose. \
+{}\n\n",
+                delete_instruction
+            );
+
+            let summary_content = format!(
+                "# CI Failures - {}\n\n{}{}\n\n---\n\n{}\n",
+                timestamp,
+                prompt,
+                checklist,
+                detail_sections.join("\n\n---\n\n")
+            );
+
+            // Create run folder: ci-failures-<timestamp>/
+            let base = cwd
+                .as_deref()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| std::env::current_dir().unwrap());
+            let run_dir = base.join(format!("ci-failures-{}", timestamp));
+            if let Err(e) = std::fs::create_dir_all(&run_dir) {
+                let _ = tx.send(BgTaskResult::FailedJobsLogsReady(format!(
+                    "Failed to create dir: {}",
+                    e
+                )));
+                return;
+            }
+
+            // Write per-job full log files inside the folder
+            for r in &results {
+                let full_content = format!(
+                    "# Full logs - {}\n\n**To reproduce:** `{}`\n\n```\n{}\n```\n",
+                    r.name, r.reproduce, r.full_logs
+                );
+                let _ = std::fs::write(run_dir.join(&r.full_filename), full_content);
+            }
+
+            // Write summary inside the folder too
+            let summary_path = run_dir.join("summary.md");
+            if let Err(e) = std::fs::write(&summary_path, &summary_content) {
+                let _ = tx.send(BgTaskResult::FailedJobsLogsReady(format!(
+                    "Failed to write summary: {}",
+                    e
+                )));
+                return;
+            }
+
+            let _ = LogModal::copy_to_clipboard_pub(&summary_content);
+            let _ = tx.send(BgTaskResult::FailedJobsLogsWrittenToFile(summary_path));
+        });
+    }
+
     /// Process completed background task results (non-blocking)
     pub fn process_bg_results(&mut self) {
+        // Tick spinner animation while fetching
+        if self.is_fetching && self.fetch_spinner.tick() {
+            let frame = self.fetch_spinner.current_frame();
+            let msg = self.fetch_spinner.message().to_string();
+            self.status_message = Some(StatusMessage::pending(format!("{} {}", frame, msg)));
+        }
+
         while let Ok(result) = self.bg_receiver.try_recv() {
             match result {
                 BgTaskResult::LogStepsDiscovered { steps } => {
@@ -997,6 +1185,22 @@ impl App {
                 }
                 BgTaskResult::PowerlineLogsError(e) => {
                     self.show_api_error(e);
+                }
+                BgTaskResult::FailedJobsLogsReady(err) => {
+                    self.is_fetching = false;
+                    self.status_message = Some(StatusMessage::error(err));
+                }
+                BgTaskResult::FailedJobsLogsWrittenToFile(path) => {
+                    self.is_fetching = false;
+                    let folder = path
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("?");
+                    self.status_message = Some(StatusMessage::info(format!(
+                        "Saved to {}/summary.md",
+                        folder
+                    )));
                 }
             }
         }
