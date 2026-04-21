@@ -920,12 +920,18 @@ impl App {
                         let reproduce = async {
                             let steps = client.get_job_steps(job_number).await.ok()?;
                             let failed_step = steps.iter().find(|s| s.status == "failed")?;
-                            let output_url = failed_step.actions.iter()
+                            let output_url = failed_step
+                                .actions
+                                .iter()
                                 .find(|a| a.status == "failed")
                                 .and_then(|a| a.output_url.as_ref())?;
                             let lines = client.fetch_log_output_pub(output_url).await.ok()?;
-                            lines.first().map(|l| LogModal::strip_ansi_pub(l).trim().to_string())
-                        }.await.unwrap_or_default();
+                            lines
+                                .first()
+                                .map(|l| LogModal::strip_ansi_pub(l).trim().to_string())
+                        }
+                        .await
+                        .unwrap_or_default();
 
                         let fetch = tokio::time::timeout(
                             std::time::Duration::from_secs(30),
@@ -942,16 +948,16 @@ impl App {
                 })
                 .collect();
 
-            let fetched: Vec<(String, String, Vec<String>)> = futures::future::join_all(fetch_tasks)
-                .await
-                .into_iter()
-                .filter_map(|r| r.ok())
-                .collect();
+            let fetched: Vec<(String, String, Vec<String>)> =
+                futures::future::join_all(fetch_tasks)
+                    .await
+                    .into_iter()
+                    .filter_map(|r| r.ok())
+                    .collect();
 
             let mut results: Vec<JobResult> = Vec::new();
 
             for (job_name, reproduce, logs) in fetched {
-
                 let clean_lines: Vec<String> =
                     logs.iter().map(|l| LogModal::strip_ansi_pub(l)).collect();
 

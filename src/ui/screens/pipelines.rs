@@ -450,10 +450,17 @@ impl PipelineScreen {
             )
         };
 
+        let filters_title = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                "[F]",
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("ILTERS ", title_style),
+        ]);
         // Create bordered block for entire filters panel
         let block = Block::default()
-            .title(" FILTERS ")
-            .title_style(title_style)
+            .title(filters_title)
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(border_style)
@@ -484,11 +491,6 @@ impl PipelineScreen {
     fn render_pipeline_list(&mut self, f: &mut Frame, area: Rect) {
         // Calculate status summary for title
         let status_summary = self.calculate_status_summary();
-        let title = if status_summary.is_empty() {
-            " PIPELINES ".to_string()
-        } else {
-            format!(" PIPELINES {} ", status_summary)
-        };
 
         // Determine border style - bold when list is focused (not in search/filter mode)
         let (border_style, border_type, title_style) =
@@ -506,9 +508,23 @@ impl PipelineScreen {
                 )
             };
 
+        let pipelines_title = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                "[P]",
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                if status_summary.is_empty() {
+                    "IPELINES ".to_string()
+                } else {
+                    format!("IPELINES {} ", status_summary)
+                },
+                title_style,
+            ),
+        ]);
         let block = Block::default()
-            .title(title)
-            .title_style(title_style)
+            .title(pipelines_title)
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(border_style)
@@ -822,9 +838,9 @@ impl PipelineScreen {
         // If search input is focused, handle text input
         if self.search_focused {
             match key.code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::Char('p') => {
                     // Exit search mode or clear if already empty
-                    if self.search_input.is_empty() {
+                    if key.code == KeyCode::Char('p') || self.search_input.is_empty() {
                         self.search_focused = false;
                     } else {
                         self.search_input.clear();
@@ -851,9 +867,10 @@ impl PipelineScreen {
         } else if self.filter_active {
             // If filter is active, delegate to faceted search widget
             match key.code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::Char('p') => {
                     // Exit filter mode
                     self.filter_active = false;
+                    self.search_focused = false;
                     // Apply filters when exiting
                     self.apply_filters();
                     false

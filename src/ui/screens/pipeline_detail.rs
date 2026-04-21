@@ -400,6 +400,22 @@ impl PipelineDetailScreen {
                 };
                 PipelineDetailAction::None
             }
+            KeyCode::Char('w') => {
+                self.focus = PanelFocus::Workflows;
+                if !self.workflows.is_empty() {
+                    let workflow_id = self.workflows[self.selected_workflow_index].id.clone();
+                    return PipelineDetailAction::LoadJobs(workflow_id);
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Char('j') => {
+                self.focus = PanelFocus::Jobs;
+                if !self.workflows.is_empty() {
+                    let workflow_id = self.workflows[self.selected_workflow_index].id.clone();
+                    return PipelineDetailAction::LoadJobs(workflow_id);
+                }
+                PipelineDetailAction::None
+            }
             KeyCode::Up => {
                 match self.focus {
                     PanelFocus::Workflows => {
@@ -453,7 +469,7 @@ impl PipelineDetailScreen {
                 }
                 PipelineDetailAction::None
             }
-            KeyCode::Char('F') => {
+            KeyCode::Char('e') => {
                 match self.focus {
                     PanelFocus::Jobs | PanelFocus::Workflows => {
                         let failed: Vec<(u32, String)> = self
@@ -537,6 +553,22 @@ impl PipelineDetailScreen {
                     self.faceted_search.handle_key(key.code);
                 } else {
                     self.focus = PanelFocus::Jobs;
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Char('w') => {
+                self.focus = PanelFocus::Workflows;
+                if !self.workflows.is_empty() {
+                    let workflow_id = self.workflows[self.selected_workflow_index].id.clone();
+                    return PipelineDetailAction::LoadJobs(workflow_id);
+                }
+                PipelineDetailAction::None
+            }
+            KeyCode::Char('j') => {
+                self.focus = PanelFocus::Jobs;
+                if !self.workflows.is_empty() {
+                    let workflow_id = self.workflows[self.selected_workflow_index].id.clone();
+                    return PipelineDetailAction::LoadJobs(workflow_id);
                 }
                 PipelineDetailAction::None
             }
@@ -781,9 +813,16 @@ impl PipelineDetailScreen {
             )
         };
 
+        let workflows_title = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                "[W]",
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("ORKFLOWS ", title_style),
+        ]);
         let block = Block::default()
-            .title(" WORKFLOWS ")
-            .title_style(title_style)
+            .title(workflows_title)
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(border_style)
@@ -918,10 +957,17 @@ impl PipelineDetailScreen {
                 )
             };
 
+        let filters_title = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                "[F]",
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("ILTERS ", title_style),
+        ]);
         // Create bordered block for filter bar (complete borders like pipelines.rs)
         let block = Block::default()
-            .title(" FILTERS ")
-            .title_style(title_style)
+            .title(filters_title)
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(border_style)
@@ -1003,12 +1049,6 @@ impl PipelineDetailScreen {
                 "Loading..."
             };
 
-        let title = format!(
-            " JOBS › {} {} ",
-            truncate_string(workflow_name, 20),
-            status_summary
-        );
-
         let (border_style, border_type, title_style) = if self.focus == PanelFocus::Jobs {
             (
                 Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
@@ -1023,9 +1063,23 @@ impl PipelineDetailScreen {
             )
         };
 
+        let jobs_title = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                "[J]",
+                Style::default().fg(SECONDARY).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    "OBS › {} {} ",
+                    truncate_string(workflow_name, 20),
+                    status_summary
+                ),
+                title_style,
+            ),
+        ]);
         let block = Block::default()
-            .title(title)
-            .title_style(title_style)
+            .title(jobs_title)
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(border_style)
@@ -1207,12 +1261,8 @@ impl PipelineDetailScreen {
         let mut footer_items = vec![
             Span::styled("[↑↓]", Style::default().fg(ACCENT)),
             Span::styled(" Nav  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[Tab]", Style::default().fg(ACCENT)),
-            Span::styled(" Switch  ", Style::default().fg(FG_PRIMARY)),
             Span::styled("[⏎]", Style::default().fg(ACCENT)),
             Span::styled(" View Logs  ", Style::default().fg(FG_PRIMARY)),
-            Span::styled("[s]", Style::default().fg(ACCENT)),
-            Span::styled(" SSH  ", Style::default().fg(FG_PRIMARY)),
         ];
 
         // Add [y]Copy when Jobs panel is focused and a job is selected
@@ -1226,9 +1276,9 @@ impl PipelineDetailScreen {
             matches!(j.status.as_str(), "failed" | "error" | "failure") && j.job_number > 0
         });
         if has_failed && matches!(self.focus, PanelFocus::Jobs | PanelFocus::Workflows) {
-            footer_items.push(Span::styled("[F]", Style::default().fg(ACCENT)));
+            footer_items.push(Span::styled("[e]", Style::default().fg(ACCENT)));
             footer_items.push(Span::styled(
-                " Save failing  ",
+                " Export failing  ",
                 Style::default().fg(FG_PRIMARY),
             ));
         }

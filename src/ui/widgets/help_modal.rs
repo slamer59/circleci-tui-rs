@@ -220,11 +220,41 @@ impl HelpModal {
             )),
             Line::from(vec![
                 Span::styled(
+                    "  w",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Focus Workflows panel",
+                    Style::default().fg(FG_PRIMARY),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "  j",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Focus Jobs panel",
+                    Style::default().fg(FG_PRIMARY),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "  f",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Focus Filter panel",
+                    Style::default().fg(FG_PRIMARY),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
                     "  Tab",
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    "         Switch between workflows and jobs",
+                    "         Cycle between panels",
                     Style::default().fg(FG_PRIMARY),
                 ),
             ]),
@@ -234,16 +264,6 @@ impl HelpModal {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("       View job logs", Style::default().fg(FG_PRIMARY)),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    "  f",
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "           Toggle failed jobs filter",
-                    Style::default().fg(FG_PRIMARY),
-                ),
             ]),
             Line::from(vec![
                 Span::styled(
@@ -264,7 +284,7 @@ impl HelpModal {
             ]),
             Line::from(vec![
                 Span::styled(
-                    "  y",
+                    "  c",
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
@@ -278,6 +298,16 @@ impl HelpModal {
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("           SSH into job", Style::default().fg(FG_PRIMARY)),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "  e",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "           Export failing job logs",
+                    Style::default().fg(FG_PRIMARY),
+                ),
             ]),
             Line::from(""),
             // Modals
