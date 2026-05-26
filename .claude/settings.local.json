@@ -12,7 +12,10 @@
       "Bash(cargo make:*)",
       "Bash(cargo install:*)",
       "Bash(/tmp/cargo-minify/bin/cargo-minify minify:*)",
-      "Bash(cargo fix:*)"
+      "Bash(cargo fix:*)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(but commit *)"
     ]
   }
 }

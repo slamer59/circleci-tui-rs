@@ -56,8 +56,8 @@ pub const FG_DIM: Color = Color::Rgb(92, 99, 112); // #5c6370
 /// Success status (green) - used for "success", "passed" states
 pub const SUCCESS: Color = Color::Rgb(152, 195, 121); // #98c379
 
-/// Failed status (deep brown-red) - used for "failed", "error" states
-pub const FAILED: Color = Color::Rgb(55, 14, 12); // #370e0c
+/// Failed status (coral red) - used for "failed", "error" states
+pub const FAILED: Color = Color::Rgb(235, 99, 107); // #eb636b
 
 /// Failed text color (soft pink) - used for error message text
 pub const FAILED_TEXT: Color = Color::Rgb(247, 168, 179); // #f7a8b3
@@ -68,11 +68,11 @@ pub const RUNNING: Color = Color::Rgb(247, 26, 189); // #f71abd
 /// Blocked status (coral) - used for "blocked", "waiting" states
 pub const BLOCKED: Color = Color::Rgb(235, 99, 107); // #eb636b
 
-/// Pending status (dim) - used for "pending", "queued" states
-pub const PENDING: Color = Color::Rgb(92, 99, 112); // #5c6370
+/// Pending status - used for "pending", "queued" states
+pub const PENDING: Color = Color::Rgb(171, 178, 191); // #abb2bf (same as FG_PRIMARY)
 
-/// Canceled status (dim) - used for "canceled", "aborted" states
-pub const CANCELED: Color = Color::Rgb(92, 99, 112); // #5c6370
+/// Canceled status - used for "canceled", "aborted" states
+pub const CANCELED: Color = Color::Rgb(130, 137, 150); // #828996
 
 // =============================================================================
 // Accent Colors

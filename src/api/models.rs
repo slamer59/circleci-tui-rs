@@ -27,6 +27,18 @@ impl Pipeline {
                 "--".to_string()
             }
             Some(wfs) => {
+                let has_running = wfs.iter().any(|w| w.status == "running");
+                let all_inactive = wfs.iter().all(|w| {
+                    w.status == "not_run"
+                        || w.status == "canceled"
+                        || w.status == "cancelled"
+                        || w.status == "on_hold"
+                });
+
+                if all_inactive {
+                    return "--".to_string();
+                }
+
                 // Find earliest created_at (when first workflow started)
                 let earliest_start = wfs.iter().map(|w| w.created_at).min();
 
@@ -35,9 +47,8 @@ impl Pipeline {
 
                 match (earliest_start, latest_stop) {
                     (Some(start), Some(stop)) => {
-                        // Calculate duration in seconds
                         let duration = stop.signed_duration_since(start);
-                        let secs = duration.num_seconds().max(0); // Ensure non-negative
+                        let secs = duration.num_seconds().max(0);
 
                         if secs < 60 {
                             format!("{}s", secs)
@@ -53,14 +64,8 @@ impl Pipeline {
                             format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
                         }
                     }
-                    (Some(_start), None) => {
-                        // Workflows are still running (no stopped_at yet)
-                        "...".to_string()
-                    }
-                    _ => {
-                        // Edge case: workflows exist but have no timestamps
-                        "--".to_string()
-                    }
+                    (Some(_start), None) if has_running => "...".to_string(),
+                    _ => "--".to_string(),
                 }
             }
         }

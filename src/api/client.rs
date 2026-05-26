@@ -19,6 +19,8 @@ pub struct CircleCIClient {
 fn map_status(status: &str) -> String {
     match status {
         "created" => "pending",
+        "errored" => "failed",
+        "setup-pending" | "setup" | "pending" => "pending",
         "running" => "running",
         "not_run" => "blocked",
         "success" => "success",
@@ -28,7 +30,7 @@ fn map_status(status: &str) -> String {
         "on_hold" => "blocked",
         "canceled" => "blocked",
         "unauthorized" => "blocked",
-        _ => "unknown",
+        _ => "pending",
     }
     .to_string()
 }
@@ -337,7 +339,7 @@ impl CircleCIClient {
             .map(|item| Workflow {
                 id: item.id,
                 name: item.name,
-                status: map_status(&item.status),
+                status: item.status,
                 created_at: item.created_at,
                 stopped_at: item.stopped_at,
                 pipeline_id: item.pipeline_id,
@@ -414,7 +416,7 @@ impl CircleCIClient {
                 Job {
                     id: item.id,
                     name: item.name,
-                    status: map_status(&item.status),
+                    status: item.status,
                     job_number: item.job_number,
                     workflow_id: workflow_id.to_string(),
                     started_at: item.started_at,
@@ -505,7 +507,7 @@ impl CircleCIClient {
 
                 actions.push(StepAction {
                     name: action_name,
-                    status: map_status(&status),
+                    status,
                     output_url,
                     index,
                 });

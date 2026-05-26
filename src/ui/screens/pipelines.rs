@@ -239,7 +239,9 @@ impl PipelineScreen {
         let mut running = 0;
 
         for pipeline in &self.filtered_pipelines {
-            match pipeline.state.as_str() {
+            let workflows = self.pipeline_workflows.get(&pipeline.id);
+            let status = derive_pipeline_status(pipeline, workflows);
+            match status {
                 "success" => success += 1,
                 "failed" | "error" => failed += 1,
                 "running" => running += 1,
@@ -325,11 +327,13 @@ impl PipelineScreen {
                     _ => true,
                 };
 
-                // Status filter
+                // Status filter (derive from workflows when available)
                 let status_match = if status_filter == "All" {
                     true
                 } else {
-                    p.state == status_filter
+                    let workflows = self.pipeline_workflows.get(&p.id);
+                    let effective = derive_pipeline_status(p, workflows);
+                    effective == status_filter
                 };
 
                 text_match && date_match && status_match
@@ -993,13 +997,48 @@ impl Default for PipelineScreen {
 
 /// Create a pipeline row for Table widget (2 lines per row)
 /// Returns a Row with 4 cells: STATUS | WORKFLOW | STAGES | DURATION
+fn derive_pipeline_status<'a>(
+    pipeline: &'a Pipeline,
+    workflows: Option<&'a Vec<Workflow>>,
+) -> &'a str {
+    match workflows {
+        Some(wfs) if !wfs.is_empty() => {
+            let has_failed = wfs
+                .iter()
+                .any(|w| w.status == "failed" || w.status == "error" || w.status == "failing");
+            let has_running = wfs.iter().any(|w| w.status == "running");
+            let has_success = wfs.iter().any(|w| w.status == "success");
+            let has_on_hold = wfs.iter().any(|w| w.status == "on_hold");
+            let has_canceled = wfs
+                .iter()
+                .any(|w| w.status == "canceled" || w.status == "cancelled");
+
+            if has_failed {
+                "failed"
+            } else if has_running {
+                "running"
+            } else if has_success {
+                "success"
+            } else if has_on_hold {
+                "on_hold"
+            } else if has_canceled {
+                "canceled"
+            } else {
+                "not_run"
+            }
+        }
+        _ => &pipeline.state,
+    }
+}
+
 fn create_pipeline_row<'a>(
     pipeline: &'a Pipeline,
     workflows: Option<&'a Vec<Workflow>>,
     selected: bool,
 ) -> Row<'a> {
-    let icon = get_status_icon(&pipeline.state);
-    let status_col = get_status_color(&pipeline.state);
+    let effective_status = derive_pipeline_status(pipeline, workflows);
+    let icon = get_status_icon(effective_status);
+    let status_col = get_status_color(effective_status);
 
     // Use relative time only (like GitHub/GitLab)
     let time_str = format_time_ago(&pipeline.created_at);
