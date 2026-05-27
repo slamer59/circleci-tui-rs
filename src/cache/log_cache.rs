@@ -27,15 +27,14 @@ pub enum CacheStatus {
 }
 
 impl LogCacheManager {
-    /// Create a new LogCacheManager with cache directory at ~/.cache/circleci-tui/logs/
     pub fn new() -> Result<Self> {
-        let cache_dir = dirs::cache_dir()
-            .context("Failed to determine cache directory")?
-            .join("circleci-tui")
-            .join("logs");
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let cache_dir = std::env::current_dir()
+            .context("Failed to determine current directory")?
+            .join("ci-logs")
+            .join(today);
 
-        // Create cache directory if it doesn't exist
-        fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
+        fs::create_dir_all(&cache_dir).context("Failed to create ci-logs directory")?;
 
         Ok(Self { cache_dir })
     }
