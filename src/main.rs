@@ -116,17 +116,23 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
 async fn run_export(config: Config) -> Result<()> {
     use api::client::CircleCIClient;
     use cache::log_cache::LogCacheManager;
+    use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+    use std::sync::Arc;
 
     let branch = git::get_current_branch()
         .ok_or_else(|| anyhow!("Not on a git branch or not in a git repository"))?;
 
     eprintln!("Fetching logs for branch: {}", branch);
 
-    let api = CircleCIClient::new(config.circle_token, config.project_slug)
-        .map_err(|e| anyhow!("Failed to create API client: {}", e))?;
+    let api = Arc::new(
+        CircleCIClient::new(config.circle_token, config.project_slug)
+            .map_err(|e| anyhow!("Failed to create API client: {}", e))?,
+    );
 
-    let cache = LogCacheManager::new()
-        .map_err(|e| anyhow!("Failed to initialize log cache: {}", e))?;
+    let cache = Arc::new(
+        LogCacheManager::new()
+            .map_err(|e| anyhow!("Failed to initialize log cache: {}", e))?,
+    );
 
     let pipelines = api
         .get_pipelines_filtered(1, Some(&branch), false)
@@ -149,38 +155,111 @@ async fn run_export(config: Config) -> Result<()> {
         .await
         .map_err(|e| anyhow!("Failed to fetch workflows: {}", e))?;
 
-    let mut exported = 0usize;
-
+    // Collect all failed jobs across all workflows first
+    let mut failed_jobs: Vec<(String, u32, String)> = Vec::new(); // (name, job_number, status)
     for workflow in &workflows {
         let (jobs, _) = api
             .get_jobs(&workflow.id)
             .await
             .map_err(|e| anyhow!("Failed to fetch jobs: {}", e))?;
 
-        for job in &jobs {
-            if job.status != "failed" && job.status != "error" {
-                continue;
+        for job in jobs {
+            if job.status == "failed" || job.status == "error" {
+                failed_jobs.push((job.name, job.job_number, job.status));
             }
-
-            let job_number = job.job_number;
-
-            eprintln!("  Exporting: {} (#{}) [{}]", job.name, job_number, job.status);
-
-            let logs = api
-                .stream_job_log(job_number)
-                .await
-                .map_err(|e| anyhow!("Failed to fetch logs for job #{}: {}", job_number, e))?;
-
-            cache
-                .put(job_number, logs, job.status.clone())
-                .map_err(|e| anyhow!("Failed to cache logs for job #{}: {}", job_number, e))?;
-
-            exported += 1;
         }
     }
 
-    if exported == 0 {
+    if failed_jobs.is_empty() {
         eprintln!("No failed jobs found.");
+        return Ok(());
+    }
+
+    let mp = Arc::new(MultiProgress::new());
+    let bar_style = ProgressStyle::with_template(
+        "{spinner:.red} {prefix:.bold} [{bar:30.cyan/blue}] {pos}/{len} steps - {msg}",
+    )
+    .unwrap()
+    .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ");
+
+    let done_style = ProgressStyle::with_template(
+        "  {prefix:.bold.green} - {msg}",
+    )
+    .unwrap();
+
+    let handles: Vec<_> = failed_jobs
+        .into_iter()
+        .map(|(name, job_number, status)| {
+            let api = Arc::clone(&api);
+            let cache = Arc::clone(&cache);
+            let mp = Arc::clone(&mp);
+            let bar_style = bar_style.clone();
+            let done_style = done_style.clone();
+
+            tokio::spawn(async move {
+                let pb = mp.add(ProgressBar::new(0));
+                pb.set_style(bar_style);
+                pb.set_prefix(format!("{} (#{job_number})", name));
+                pb.set_message("fetching steps...");
+                pb.enable_steady_tick(std::time::Duration::from_millis(80));
+
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize, String)>();
+
+                // Spawn a task to forward progress updates to the bar
+                let pb_progress = pb.clone();
+                let progress_task = tokio::spawn(async move {
+                    while let Some((current, total, step_name)) = rx.recv().await {
+                        pb_progress.set_length(total as u64);
+                        pb_progress.set_position(current as u64);
+                        pb_progress.set_message(step_name);
+                    }
+                });
+
+                let result = api
+                    .stream_job_log_with_progress(job_number, Some(tx))
+                    .await
+                    .map_err(|e| anyhow!("Failed to fetch logs for job #{}: {}", job_number, e));
+
+                let _ = progress_task.await;
+
+                match result {
+                    Ok(logs) => {
+                        let line_count = logs.len();
+                        cache
+                            .put(job_number, logs, status)
+                            .map_err(|e| anyhow!("Failed to cache logs for job #{}: {}", job_number, e))?;
+
+                        pb.set_style(done_style);
+                        pb.finish_with_message(format!("{} lines saved", line_count));
+                        Ok(())
+                    }
+                    Err(e) => {
+                        pb.abandon_with_message(format!("error: {}", e));
+                        Err(e)
+                    }
+                }
+            })
+        })
+        .collect();
+
+    let mut exported = 0usize;
+    let mut errors = 0usize;
+    for handle in handles {
+        match handle.await {
+            Ok(Ok(())) => exported += 1,
+            Ok(Err(e)) => {
+                errors += 1;
+                eprintln!("Error: {}", e);
+            }
+            Err(e) => {
+                errors += 1;
+                eprintln!("Task error: {}", e);
+            }
+        }
+    }
+
+    if errors > 0 {
+        eprintln!("{} failed job(s) exported, {} error(s).", exported, errors);
     } else {
         eprintln!("{} failed job(s) exported to ci-logs/", exported);
     }
