@@ -29,10 +29,11 @@ pub enum CacheStatus {
 impl LogCacheManager {
     pub fn new() -> Result<Self> {
         let today = Utc::now().format("%Y-%m-%d").to_string();
-        let cache_dir = std::env::current_dir()
-            .context("Failed to determine current directory")?
-            .join("ci-logs")
-            .join(today);
+        let root = git2::Repository::discover(".")
+            .ok()
+            .and_then(|r| r.workdir().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let cache_dir = root.join("ci-logs").join(today);
 
         fs::create_dir_all(&cache_dir).context("Failed to create ci-logs directory")?;
 
