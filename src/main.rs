@@ -113,9 +113,16 @@ async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Resul
     Ok(())
 }
 
+fn sanitize_name(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
 async fn run_export(config: Config) -> Result<()> {
     use api::client::CircleCIClient;
-    use cache::log_cache::LogCacheManager;
     use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
     use std::sync::Arc;
 
@@ -127,11 +134,6 @@ async fn run_export(config: Config) -> Result<()> {
     let api = Arc::new(
         CircleCIClient::new(config.circle_token, config.project_slug)
             .map_err(|e| anyhow!("Failed to create API client: {}", e))?,
-    );
-
-    let cache = Arc::new(
-        LogCacheManager::new()
-            .map_err(|e| anyhow!("Failed to initialize log cache: {}", e))?,
     );
 
     let pipelines = api
@@ -155,8 +157,8 @@ async fn run_export(config: Config) -> Result<()> {
         .await
         .map_err(|e| anyhow!("Failed to fetch workflows: {}", e))?;
 
-    // Collect all failed jobs across all workflows first
-    let mut failed_jobs: Vec<(String, u32, String)> = Vec::new(); // (name, job_number, status)
+    // Collect all failed jobs across all workflows: (workflow_name, job_name, job_number, status)
+    let mut failed_jobs: Vec<(String, String, u32, String)> = Vec::new();
     for workflow in &workflows {
         let (jobs, _) = api
             .get_jobs(&workflow.id)
@@ -165,7 +167,7 @@ async fn run_export(config: Config) -> Result<()> {
 
         for job in jobs {
             if job.status == "failed" || job.status == "error" {
-                failed_jobs.push((job.name, job.job_number, job.status));
+                failed_jobs.push((workflow.name.clone(), job.name, job.job_number, job.status));
             }
         }
     }
@@ -175,6 +177,17 @@ async fn run_export(config: Config) -> Result<()> {
         return Ok(());
     }
 
+    // Export dir: ci-logs/{pipeline_number}/
+    let git_root = git2::Repository::discover(".")
+        .ok()
+        .and_then(|r| r.workdir().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::env::current_dir().unwrap());
+    let export_dir = git_root
+        .join("ci-logs")
+        .join(pipeline.number.to_string());
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| anyhow!("Failed to create export directory: {}", e))?;
+
     let mp = Arc::new(MultiProgress::new());
     let bar_style = ProgressStyle::with_template(
         "{spinner:.red} {prefix:.bold} [{bar:30.cyan/blue}] {pos}/{len} steps - {msg}",
@@ -182,30 +195,35 @@ async fn run_export(config: Config) -> Result<()> {
     .unwrap()
     .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ");
 
-    let done_style = ProgressStyle::with_template(
-        "  {prefix:.bold.green} - {msg}",
-    )
-    .unwrap();
+    let done_style = ProgressStyle::with_template("  {prefix:.bold.green} - {msg}").unwrap();
 
+    // Each task returns (filename, line_count) on success
     let handles: Vec<_> = failed_jobs
-        .into_iter()
-        .map(|(name, job_number, status)| {
+        .iter()
+        .map(|(workflow_name, job_name, job_number, _status)| {
             let api = Arc::clone(&api);
-            let cache = Arc::clone(&cache);
             let mp = Arc::clone(&mp);
             let bar_style = bar_style.clone();
             let done_style = done_style.clone();
+            let filename = format!(
+                "{}-{}.log",
+                sanitize_name(workflow_name),
+                sanitize_name(job_name)
+            );
+            let log_path = export_dir.join(&filename);
+            let job_number = *job_number;
+            let prefix = format!("{}/{}", workflow_name, job_name);
 
             tokio::spawn(async move {
                 let pb = mp.add(ProgressBar::new(0));
                 pb.set_style(bar_style);
-                pb.set_prefix(format!("{} (#{job_number})", name));
+                pb.set_prefix(prefix);
                 pb.set_message("fetching steps...");
                 pb.enable_steady_tick(std::time::Duration::from_millis(80));
 
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize, String)>();
+                let (tx, mut rx) =
+                    tokio::sync::mpsc::unbounded_channel::<(usize, usize, String)>();
 
-                // Spawn a task to forward progress updates to the bar
                 let pb_progress = pb.clone();
                 let progress_task = tokio::spawn(async move {
                     while let Some((current, total, step_name)) = rx.recv().await {
@@ -225,13 +243,12 @@ async fn run_export(config: Config) -> Result<()> {
                 match result {
                     Ok(logs) => {
                         let line_count = logs.len();
-                        cache
-                            .put(job_number, logs, status)
-                            .map_err(|e| anyhow!("Failed to cache logs for job #{}: {}", job_number, e))?;
-
+                        let content = logs.join("\n");
+                        std::fs::write(&log_path, content)
+                            .map_err(|e| anyhow!("Failed to write {}: {}", filename, e))?;
                         pb.set_style(done_style);
-                        pb.finish_with_message(format!("{} lines saved", line_count));
-                        Ok(())
+                        pb.finish_with_message(format!("{} lines - {}", line_count, filename));
+                        Ok(filename)
                     }
                     Err(e) => {
                         pb.abandon_with_message(format!("error: {}", e));
@@ -242,11 +259,11 @@ async fn run_export(config: Config) -> Result<()> {
         })
         .collect();
 
-    let mut exported = 0usize;
+    let mut filenames: Vec<String> = Vec::new();
     let mut errors = 0usize;
     for handle in handles {
         match handle.await {
-            Ok(Ok(())) => exported += 1,
+            Ok(Ok(filename)) => filenames.push(filename),
             Ok(Err(e)) => {
                 errors += 1;
                 eprintln!("Error: {}", e);
@@ -258,10 +275,39 @@ async fn run_export(config: Config) -> Result<()> {
         }
     }
 
+    // Write summary.md
+    if !filenames.is_empty() {
+        filenames.sort();
+        let checklist = filenames
+            .iter()
+            .map(|f| format!("- [ ] {}", f.trim_end_matches(".log")))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let file_list = filenames
+            .iter()
+            .map(|f| format!("- `{}`", f))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let summary = format!(
+            "# CI Failures - Pipeline #{}\n\nBranch: `{}`\nCommit: {}\n\n## Failed jobs\n{}\n\n## Log files\n{}\nCheck the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue. Check the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue.",
+            pipeline.number,
+            branch,
+            pipeline.vcs.commit_subject,
+            checklist,
+            file_list,
+            );
+        let summary_path = export_dir.join("summary.md");
+        if let Err(e) = std::fs::write(&summary_path, &summary) {
+            eprintln!("Warning: failed to write summary.md: {}", e);
+        }
+    }
+
+    let exported = filenames.len();
+    let rel_dir = format!("ci-logs/{}/", pipeline.number);
     if errors > 0 {
-        eprintln!("{} failed job(s) exported, {} error(s).", exported, errors);
+        eprintln!("{} failed job(s) exported to {}, {} error(s).", exported, rel_dir, errors);
     } else {
-        eprintln!("{} failed job(s) exported to ci-logs/", exported);
+        eprintln!("{} failed job(s) exported to {}", exported, rel_dir);
     }
 
     Ok(())
