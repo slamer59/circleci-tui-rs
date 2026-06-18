@@ -283,13 +283,17 @@ async fn run_export(config: Config) -> Result<()> {
             .map(|f| format!("- [ ] {}", f.trim_end_matches(".log")))
             .collect::<Vec<_>>()
             .join("\n");
-        let file_list = filenames
-            .iter()
-            .map(|f| format!("- `{}`", f))
+        let rel_prefix = format!("ci-logs/{}", pipeline.number);
+        let file_list = std::iter::once(format!("- `{}/summary.md`", rel_prefix))
+            .chain(
+                filenames
+                    .iter()
+                    .map(|f| format!("- `{}/{}`", rel_prefix, f)),
+            )
             .collect::<Vec<_>>()
             .join("\n");
         let summary = format!(
-            "# CI Failures - Pipeline #{}\n\nBranch: `{}`\nCommit: {}\n\n## Failed jobs\n{}\n\n## Log files\n{}\nCheck the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue. Check the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue.",
+            "# CI Failures - Pipeline #{}\n\nBranch: `{}`\nCommit: {}\n\n## Failed jobs\n{}\n\n## Log files\n{}\nCheck the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue.",
             pipeline.number,
             branch,
             pipeline.vcs.commit_subject,
