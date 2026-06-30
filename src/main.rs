@@ -182,8 +182,10 @@ async fn run_export(config: Config) -> Result<()> {
         .ok()
         .and_then(|r| r.workdir().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| std::env::current_dir().unwrap());
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let export_dir = git_root
         .join("ci-logs")
+        .join(&today)
         .join(pipeline.number.to_string());
     std::fs::create_dir_all(&export_dir)
         .map_err(|e| anyhow!("Failed to create export directory: {}", e))?;
@@ -283,7 +285,7 @@ async fn run_export(config: Config) -> Result<()> {
             .map(|f| format!("- [ ] {}", f.trim_end_matches(".log")))
             .collect::<Vec<_>>()
             .join("\n");
-        let rel_prefix = format!("ci-logs/{}", pipeline.number);
+        let rel_prefix = format!("ci-logs/{}/{}", today, pipeline.number);
         let file_list = std::iter::once(format!("- `{}/summary.md`", rel_prefix))
             .chain(
                 filenames
@@ -307,7 +309,7 @@ async fn run_export(config: Config) -> Result<()> {
     }
 
     let exported = filenames.len();
-    let summary_rel = format!("ci-logs/{}/summary.md", pipeline.number);
+    let summary_rel = format!("ci-logs/{}/{}/summary.md", today, pipeline.number);
     if errors > 0 {
         eprintln!("{} failed job(s) exported, see {} ({} error(s)).", exported, summary_rel, errors);
     } else {
