@@ -307,11 +307,11 @@ async fn run_export(config: Config) -> Result<()> {
     }
 
     let exported = filenames.len();
-    let rel_dir = format!("ci-logs/{}/", pipeline.number);
+    let summary_rel = format!("ci-logs/{}/summary.md", pipeline.number);
     if errors > 0 {
-        eprintln!("{} failed job(s) exported to {}, {} error(s).", exported, rel_dir, errors);
+        eprintln!("{} failed job(s) exported, see {} ({} error(s)).", exported, summary_rel, errors);
     } else {
-        eprintln!("{} failed job(s) exported to {}", exported, rel_dir);
+        eprintln!("{} failed job(s) exported, see {}", exported, summary_rel);
     }
 
     Ok(())
