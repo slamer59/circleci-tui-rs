@@ -199,7 +199,7 @@ async fn run_export(config: Config) -> Result<()> {
 
     let done_style = ProgressStyle::with_template("  {prefix:.bold.green} - {msg}").unwrap();
 
-    // Each task returns (filename, line_count) on success
+    // Each task returns (job_filename, per-step filenames) on success
     let handles: Vec<_> = failed_jobs
         .iter()
         .map(|(workflow_name, job_name, job_number, _status)| {
@@ -207,12 +207,14 @@ async fn run_export(config: Config) -> Result<()> {
             let mp = Arc::clone(&mp);
             let bar_style = bar_style.clone();
             let done_style = done_style.clone();
-            let filename = format!(
-                "{}-{}.log",
+            let job_base = format!(
+                "{}-{}",
                 sanitize_name(workflow_name),
                 sanitize_name(job_name)
             );
+            let filename = format!("{}.log", job_base);
             let log_path = export_dir.join(&filename);
+            let export_dir = export_dir.clone();
             let job_number = *job_number;
             let prefix = format!("{}/{}", workflow_name, job_name);
 
@@ -223,49 +225,102 @@ async fn run_export(config: Config) -> Result<()> {
                 pb.set_message("fetching steps...");
                 pb.enable_steady_tick(std::time::Duration::from_millis(80));
 
-                let (tx, mut rx) =
-                    tokio::sync::mpsc::unbounded_channel::<(usize, usize, String)>();
-
-                let pb_progress = pb.clone();
-                let progress_task = tokio::spawn(async move {
-                    while let Some((current, total, step_name)) = rx.recv().await {
-                        pb_progress.set_length(total as u64);
-                        pb_progress.set_position(current as u64);
-                        pb_progress.set_message(step_name);
-                    }
-                });
-
-                let result = api
-                    .stream_job_log_with_progress(job_number, Some(tx))
+                let steps = api
+                    .get_job_steps(job_number)
                     .await
-                    .map_err(|e| anyhow!("Failed to fetch logs for job #{}: {}", job_number, e));
+                    .map_err(|e| anyhow!("Failed to fetch steps for job #{}: {}", job_number, e))?;
 
-                let _ = progress_task.await;
+                let total_actions: usize = steps
+                    .iter()
+                    .flat_map(|s| &s.actions)
+                    .filter(|a| a.output_url.is_some())
+                    .count();
+                pb.set_length(total_actions as u64);
 
-                match result {
-                    Ok(logs) => {
-                        let line_count = logs.len();
-                        let content = logs.join("\n");
-                        std::fs::write(&log_path, content)
-                            .map_err(|e| anyhow!("Failed to write {}: {}", filename, e))?;
-                        pb.set_style(done_style);
-                        pb.finish_with_message(format!("{} lines - {}", line_count, filename));
-                        Ok(filename)
+                let mut all_logs: Vec<String> = Vec::new();
+                let mut step_files: Vec<(String, usize)> = Vec::new();
+                let mut fetched_count = 0usize;
+
+                for (step_idx, step) in steps.iter().enumerate() {
+                    if step_idx > 0 {
+                        all_logs.push(String::new());
                     }
-                    Err(e) => {
-                        pb.abandon_with_message(format!("error: {}", e));
-                        Err(e)
+
+                    let mut step_logs: Vec<String> = Vec::new();
+                    let mut step_has_output = false;
+
+                    for action in &step.actions {
+                        all_logs.push(action.name.clone());
+                        step_logs.push(action.name.clone());
+
+                        if let Some(output_url) = &action.output_url {
+                            step_has_output = true;
+                            match api.fetch_log_output_pub(output_url).await {
+                                Ok(lines) => {
+                                    for line in lines {
+                                        if !line.is_empty() {
+                                            all_logs.push(line.clone());
+                                            step_logs.push(line);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let msg = format!("[Error fetching logs: {}]", e);
+                                    all_logs.push(msg.clone());
+                                    step_logs.push(msg);
+                                }
+                            }
+
+                            fetched_count += 1;
+                            pb.set_position(fetched_count as u64);
+                            pb.set_message(action.name.clone());
+                        } else if action.status == "running" {
+                            all_logs.push("[Waiting for output...]".to_string());
+                        } else if action.status == "pending" {
+                            all_logs.push("[Pending...]".to_string());
+                        }
+
+                        all_logs.push(String::new());
+                    }
+
+                    if step_has_output {
+                        let step_filename = format!(
+                            "{}--step-{:02}-{}.log",
+                            job_base,
+                            step_idx + 1,
+                            sanitize_name(&step.name)
+                        );
+                        let step_path = export_dir.join(&step_filename);
+                        let step_content = step_logs.join("\n");
+                        let step_line_count = step_logs.len();
+                        std::fs::write(&step_path, step_content).map_err(|e| {
+                            anyhow!("Failed to write {}: {}", step_filename, e)
+                        })?;
+                        step_files.push((step_filename, step_line_count));
                     }
                 }
+
+                let line_count = all_logs.len();
+                let content = all_logs.join("\n");
+                std::fs::write(&log_path, content)
+                    .map_err(|e| anyhow!("Failed to write {}: {}", filename, e))?;
+                pb.set_style(done_style);
+                pb.finish_with_message(format!("{} lines - {}", line_count, filename));
+                Ok::<(String, Vec<(String, usize)>), anyhow::Error>((filename, step_files))
             })
         })
         .collect();
 
     let mut filenames: Vec<String> = Vec::new();
+    let mut job_step_files: std::collections::HashMap<String, Vec<(String, usize)>> =
+        std::collections::HashMap::new();
     let mut errors = 0usize;
     for handle in handles {
         match handle.await {
-            Ok(Ok(filename)) => filenames.push(filename),
+            Ok(Ok((filename, step_files))) => {
+                job_step_files.insert(filename.clone(), step_files);
+                filenames.push(filename);
+            }
             Ok(Err(e)) => {
                 errors += 1;
                 eprintln!("Error: {}", e);
@@ -287,15 +342,22 @@ async fn run_export(config: Config) -> Result<()> {
             .join("\n");
         let rel_prefix = format!("ci-logs/{}/{}", today, pipeline.number);
         let file_list = std::iter::once(format!("- `{}/summary.md`", rel_prefix))
-            .chain(
-                filenames
-                    .iter()
-                    .map(|f| format!("- `{}/{}`", rel_prefix, f)),
-            )
+            .chain(filenames.iter().flat_map(|f| {
+                let mut entries = vec![format!("- `{}/{}`", rel_prefix, f)];
+                if let Some(step_files) = job_step_files.get(f) {
+                    for (step_file, line_count) in step_files {
+                        entries.push(format!(
+                            "  - `{}/{}` ({} lines)",
+                            rel_prefix, step_file, line_count
+                        ));
+                    }
+                }
+                entries
+            }))
             .collect::<Vec<_>>()
             .join("\n");
         let summary = format!(
-            "# CI Failures - Pipeline #{}\n\nBranch: `{}`\nCommit: {}\n\n## Failed jobs\n{}\n\n## Log files\n{}\nCheck the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue.",
+            "# CI Failures - Pipeline #{}\n\nBranch: `{}`\nCommit: {}\n\n## Failed jobs\n{}\n\n## Log files\nEach failed job's full log is listed with its per-step log files nested below it. Focus on the per-step logs first - use `rtk` (e.g. `rtk proxy grep`, `rtk proxy cat`) to inspect them, since they're smaller and isolate the failing step.\n{}\nCheck the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue.",
             pipeline.number,
             branch,
             pipeline.vcs.commit_subject,
