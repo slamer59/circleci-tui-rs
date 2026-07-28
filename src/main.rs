@@ -121,7 +121,7 @@ fn sanitize_name(s: &str) -> String {
         .to_string()
 }
 
-async fn run_export(config: Config) -> Result<()> {
+async fn run_export(config: Config, all_steps: bool) -> Result<()> {
     use api::client::CircleCIClient;
     use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
     use std::sync::Arc;
@@ -283,7 +283,7 @@ async fn run_export(config: Config) -> Result<()> {
                         all_logs.push(String::new());
                     }
 
-                    if step_has_output {
+                    if step_has_output && (all_steps || step.status == "failed") {
                         let step_filename = format!(
                             "{}--step-{:02}-{}.log",
                             job_base,
@@ -341,13 +341,13 @@ async fn run_export(config: Config) -> Result<()> {
             .collect::<Vec<_>>()
             .join("\n");
         let rel_prefix = format!("ci-logs/{}/{}", today, pipeline.number);
-        let file_list = std::iter::once(format!("- `{}/summary.md`", rel_prefix))
+        let file_list = std::iter::once(format!("- `rtk cat {}/summary.md`", rel_prefix))
             .chain(filenames.iter().flat_map(|f| {
                 let mut entries = vec![format!("- `{}/{}`", rel_prefix, f)];
                 if let Some(step_files) = job_step_files.get(f) {
                     for (step_file, line_count) in step_files {
                         entries.push(format!(
-                            "  - `{}/{}` ({} lines)",
+                            "  - `rtk log {}/{}` ({} lines)",
                             rel_prefix, step_file, line_count
                         ));
                     }
@@ -357,7 +357,7 @@ async fn run_export(config: Config) -> Result<()> {
             .collect::<Vec<_>>()
             .join("\n");
         let summary = format!(
-            "# CI Failures - Pipeline #{}\n\nBranch: `{}`\nCommit: {}\n\n## Failed jobs\n{}\n\n## Log files\nEach failed job's full log is listed with its per-step log files nested below it. Focus on the per-step logs first - use `rtk` (e.g. `rtk proxy grep`, `rtk proxy cat`) to inspect them, since they're smaller and isolate the failing step.\n{}\nCheck the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue.",
+            "# CI Failures - Pipeline #{}\n\nBranch: `{}`\nCommit: {}\n\n## Failed jobs\n{}\n\n## Log files\nEach failed job's full log is listed with its per-step log files nested below it. Focus on the per-step logs first - ALWAYS  use `rtk log` for logs not `rtk grep` (e.g. `rtk log some.log`, `rtk cat somecat.txt`) to inspect them, since they're smaller and isolate the failing step.\n{}\nCheck the individual log files for details on each failure. You can use the checklist above to track your investigation and resolution of each issue.",
             pipeline.number,
             branch,
             pipeline.vcs.commit_subject,
@@ -384,7 +384,9 @@ async fn run_export(config: Config) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Check for -e / --export flag before setting up the TUI
-    let export_mode = std::env::args().any(|a| a == "-e" || a == "--export");
+    let args: Vec<String> = std::env::args().collect();
+    let export_mode = args.iter().any(|a| a == "-e" || a == "--export");
+    let all_steps = args.iter().any(|a| a == "--all-steps");
 
     // Load configuration
     let config = match Config::load() {
@@ -399,7 +401,7 @@ async fn main() -> Result<()> {
     };
 
     if export_mode {
-        if let Err(err) = run_export(config).await {
+        if let Err(err) = run_export(config, all_steps).await {
             eprintln!("Error: {}", err);
             std::process::exit(1);
         }

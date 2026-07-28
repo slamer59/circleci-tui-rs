@@ -15,7 +15,22 @@
       "Bash(cargo fix:*)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(but commit *)"
+      "Bash(but commit *)",
+      "Bash(but push *)",
+      "Bash(git push *)",
+      "Bash(git config *)",
+      "Bash(cargo build *)",
+      "Bash(git *)",
+      "Bash(flatpak list *)",
+      "Bash(dpkg -l)",
+      "Bash(snap list *)",
+      "Bash(sudo apt *)",
+      "Bash(snap install *)",
+      "Bash(sudo snap *)",
+      "Bash(rtk grep *)",
+      "Bash(rtk wc *)",
+      "Bash(rtk ls *)",
+      "Bash(rtk proxy *)"
     ]
   }
 }
