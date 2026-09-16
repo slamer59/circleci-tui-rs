@@ -1,7 +1,7 @@
 //! Configuration loading for CircleCI TUI
 //!
 //! This module handles loading configuration from environment variables
-//! using the .env file.
+//! using `.env.local` and `.env` files.
 
 use anyhow::{Context, Result};
 use std::env;
@@ -16,16 +16,19 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load configuration from .env file
+    /// Load configuration from environment and dotenv files
     ///
-    /// This method loads the .env file and reads the following variables:
+    /// This method loads `.env.local` before `.env`, so local values take
+    /// precedence. Variables already present in the process environment take
+    /// precedence over both files.
+    ///
+    /// It reads the following variables:
     /// - `CIRCLECI_TOKEN`: CircleCI API token (required)
     /// - `PROJECT_SLUG`: Project slug (required)
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The .env file cannot be loaded
     /// - Required environment variables are missing
     ///
     /// # Examples
@@ -38,7 +41,9 @@ impl Config {
     /// println!("Project: {}", config.project_slug);
     /// ```
     pub fn load() -> Result<Self> {
-        // Load .env file if it exists (don't error if it doesn't)
+        // dotenvy preserves existing variables, so loading the local file first
+        // gives us: process environment > .env.local > .env.
+        let _ = dotenvy::from_filename(".env.local");
         let _ = dotenvy::dotenv();
 
         let circle_token = env::var("CIRCLECI_TOKEN")

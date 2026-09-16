@@ -75,6 +75,9 @@ CIRCLECI_TOKEN=your_circleci_api_token_here
 PROJECT_SLUG=gh/owner/repo
 ```
 
+For machine-specific overrides, create a `.env.local` file. Precedence is:
+existing environment variables, then `.env.local`, then `.env`.
+
 ### Getting a CircleCI Token
 
 1. Go to [CircleCI User Settings](https://app.circleci.com/settings/user/tokens)
