@@ -5,6 +5,20 @@
 
 use git2::Repository;
 
+/// Extracts the branch name from a remote-tracking ref.
+///
+/// `refs/remotes/origin/main` → `main`. Slash-separated branch names are preserved:
+/// `refs/remotes/origin/renovate/lock-file-maintenance` → `renovate/lock-file-maintenance`.
+///
+/// Returns `None` for anything that is not a remote-tracking ref, so the caller can fall
+/// back to the local branch name.
+fn branch_name_from_upstream_ref(upstream: &str) -> Option<String> {
+    let without_prefix = upstream.strip_prefix("refs/remotes/")?;
+    // Drop the remote name; everything after it is the branch (slashes included).
+    let (_remote, branch) = without_prefix.split_once('/')?;
+    Some(branch.to_string())
+}
+
 /// Gets the remote tracking branch name (what CircleCI sees).
 ///
 /// This function attempts to discover a git repository and returns the remote
@@ -48,6 +62,8 @@ use git2::Repository;
 /// Uses `Repository::discover(".")` to find the git repository, which searches
 /// upward from the current directory. For branches with remotes, it extracts
 /// the branch name from the upstream reference (e.g., `refs/remotes/origin/main` → `main`).
+/// Slash-separated branch names are supported and preserved
+/// (`refs/remotes/origin/renovate/lock-file-maintenance` → `renovate/lock-file-maintenance`).
 pub fn get_current_branch() -> Option<String> {
     // Attempt to discover the git repository from the current directory
     let repo = match Repository::discover(".") {
@@ -90,13 +106,8 @@ pub fn get_current_branch() -> Option<String> {
 
     // Parse upstream branch name if we have one
     if let Some(upstream) = upstream_name {
-        // Parse the branch name from refs/remotes/origin/branch-name
-        // We want just "branch-name" (what CircleCI sees)
-        if let Some(branch_name) = upstream.strip_prefix("refs/remotes/") {
-            // Strip the remote name (e.g., "origin/main" → "main")
-            if let Some((_remote, branch)) = branch_name.split_once('/') {
-                return Some(branch.to_string());
-            }
+        if let Some(branch_name) = branch_name_from_upstream_ref(&upstream) {
+            return Some(branch_name);
         }
     }
 
@@ -121,11 +132,35 @@ mod tests {
 
     #[test]
     fn test_get_current_branch_returns_string() {
-        // Test that when a branch is found, it's a valid non-empty string
+        // When a branch is found it must be a plain branch name, never a full ref.
+        // Slash-separated names (`renovate/lock-file-maintenance`, `feature/x`) are valid
+        // branch names, so a '/' is not by itself a problem.
         if let Some(branch) = get_current_branch() {
             assert!(!branch.is_empty());
-            // Branch names shouldn't contain path separators
-            assert!(!branch.contains('/') || branch.contains("refs/"));
+            assert!(
+                !branch.starts_with("refs/"),
+                "expected a branch name, got a ref: {branch}"
+            );
         }
+    }
+
+    #[test]
+    fn test_branch_name_from_upstream_ref() {
+        assert_eq!(
+            branch_name_from_upstream_ref("refs/remotes/origin/main").as_deref(),
+            Some("main")
+        );
+        assert_eq!(
+            branch_name_from_upstream_ref("refs/remotes/origin/renovate/lock-file-maintenance")
+                .as_deref(),
+            Some("renovate/lock-file-maintenance")
+        );
+        assert_eq!(
+            branch_name_from_upstream_ref("refs/remotes/upstream/feature/deep/nested").as_deref(),
+            Some("feature/deep/nested")
+        );
+        // Not a remote-tracking ref: the caller falls back to the local branch name.
+        assert_eq!(branch_name_from_upstream_ref("refs/heads/main"), None);
+        assert_eq!(branch_name_from_upstream_ref("main"), None);
     }
 }
