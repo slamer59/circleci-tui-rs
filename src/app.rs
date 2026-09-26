@@ -1236,9 +1236,12 @@ Only load the full log file if the summary is not enough to diagnose. \
     /// # Examples
     ///
     /// ```
-    /// if let Err(e) = api_call().await {
+    /// # use circleci_tui_rs::app::App;
+    /// # async fn handle(app: &mut App, result: Result<(), anyhow::Error>) {
+    /// if let Err(e) = result {
     ///     app.show_api_error(e);
     /// }
+    /// # }
     /// ```
     pub fn show_api_error(&mut self, error: anyhow::Error) {
         let error_message = format!("{}", error);
@@ -1358,6 +1361,33 @@ mod tests {
     use super::*;
     use crate::api::models::ExecutorInfo;
     use chrono::Utc;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// Render the app's error modal (when present) into an off-screen terminal
+    fn render_error_modal(app: &mut App) -> Terminal<TestBackend> {
+        let mut terminal = Terminal::new(TestBackend::new(200, 200)).unwrap();
+        terminal
+            .draw(|frame| {
+                if let Some(modal) = app.error_modal.as_mut() {
+                    let area = frame.area();
+                    modal.render(frame, area);
+                }
+            })
+            .unwrap();
+        terminal
+    }
+
+    /// Collect every rendered cell symbol into one string
+    fn rendered_text(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
 
     fn create_test_config() -> Config {
         Config {
@@ -1499,12 +1529,12 @@ mod tests {
         let config = create_test_config();
         let mut app = App::new(config).await.unwrap();
 
-        // Show simple error
-        app.show_error("Test Error", "Something went wrong");
+        // Show an API error (errors are surfaced through show_api_error)
+        app.show_api_error(anyhow::anyhow!("Something went wrong"));
         assert!(app.error_modal.is_some());
 
-        // Close error modal
-        app.error_modal = None;
+        // Dismissing the modal (Esc) clears it through the normal event path
+        app.handle_event(KeyEvent::from(KeyCode::Esc)).unwrap();
         assert!(app.error_modal.is_none());
     }
 
@@ -1513,11 +1543,39 @@ mod tests {
         let config = create_test_config();
         let mut app = App::new(config).await.unwrap();
 
-        // Show error with details
-        app.show_error_with_details("API Error", "Request failed", "Details here");
+        // Show error with details: App builds it via ErrorModal::with_details(..).with_retry()
+        app.show_api_error(anyhow::anyhow!("Request failed"));
         assert!(app.error_modal.is_some());
-        if let Some(modal) = &app.error_modal {
-            assert!(modal.is_visible());
-        }
+
+        // The modal is visible, titled after the generic API error branch, and
+        // offers an expandable details section ("[d] to show details")
+        let terminal = render_error_modal(&mut app);
+        let collapsed = rendered_text(&terminal);
+        assert!(collapsed.contains("API Error"), "title missing: {collapsed}");
+        assert!(
+            collapsed.contains("to show details"),
+            "details hint missing: {collapsed}"
+        );
+
+        // Expanding the details ([d]) reveals the technical details and keeps the modal open
+        let modal = app.error_modal.as_mut().expect("error modal should be shown");
+        assert_eq!(
+            modal.handle_input(KeyEvent::from(KeyCode::Char('d'))),
+            ErrorAction::None
+        );
+        let terminal = render_error_modal(&mut app);
+        let expanded = rendered_text(&terminal);
+        assert!(expanded.contains(" Details "), "details missing: {expanded}");
+        assert!(
+            expanded.contains("What to try:"),
+            "technical details missing: {expanded}"
+        );
+
+        // Retry is available for API errors
+        let modal = app.error_modal.as_mut().expect("error modal should be shown");
+        assert_eq!(
+            modal.handle_input(KeyEvent::from(KeyCode::Char('r'))),
+            ErrorAction::Retry
+        );
     }
 }

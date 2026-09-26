@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_confirm_modal_creation() {
         let modal = ConfirmModal::new("Test message".to_string());
-        assert!(modal.is_visible());
+        assert!(modal.visible);
         assert_eq!(modal.selected_button, 0);
     }
 

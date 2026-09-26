@@ -385,8 +385,9 @@ impl FacetedSearchBar {
     /// # Example
     ///
     /// ```rust,no_run
-    /// use circleci_tui_rs::ui::widgets::faceted_search::FacetedSearchBar;
+    /// use circleci_tui_rs::ui::widgets::faceted_search::{Facet, FacetedSearchBar};
     ///
+    /// let facets = vec![Facet::new("branch", vec!["All".to_string(), "main".to_string()], 0)];
     /// let mut search_bar = FacetedSearchBar::new(facets);
     /// let new_branches = vec!["All".to_string(), "main".to_string(), "dev".to_string()];
     /// search_bar.update_facet_options(1, new_branches);
@@ -683,18 +684,19 @@ mod tests {
         ];
         let mut search_bar = FacetedSearchBar::new(facets);
 
-        assert_eq!(search_bar.get_active_filters().len(), 0);
+        assert_eq!(search_bar.get_active_filter_count(), 0);
 
         search_bar.facets[0].selected_index = 1;
         search_bar.facets[0].update_name();
-        let active = search_bar.get_active_filters();
-        assert_eq!(active.len(), 1);
-        assert_eq!(active[0], "●: Some");
+        assert_eq!(search_bar.get_active_filter_count(), 1);
+        assert_eq!(search_bar.get_facet_selection(0), 1);
+        assert_eq!(search_bar.get_filter_value(0), Some("Some"));
 
         search_bar.facets[1].selected_index = 1;
         search_bar.facets[1].update_name();
-        let active = search_bar.get_active_filters();
-        assert_eq!(active.len(), 2);
+        assert_eq!(search_bar.get_active_filter_count(), 2);
+        assert_eq!(search_bar.get_facet_selection(1), 1);
+        assert_eq!(search_bar.get_filter_value(1), Some("Specific"));
     }
 
     #[test]
@@ -792,56 +794,6 @@ mod tests {
 
         // Try to update a non-existent facet
         let result = search_bar.update_facet_options(5, vec!["New".to_string()]);
-        assert!(!result);
-    }
-
-    #[test]
-    fn test_get_filter_state() {
-        let facets = vec![
-            Facet::new("●", vec!["All".to_string(), "Some".to_string()], 0),
-            Facet::new("☍", vec!["Any".to_string(), "Specific".to_string()], 0),
-        ];
-        let mut search_bar = FacetedSearchBar::new(facets);
-
-        // Default state
-        let state = search_bar.get_filter_state();
-        assert_eq!(state, vec![0, 0]);
-
-        // Change selections
-        search_bar.facets[0].selected_index = 1;
-        search_bar.facets[1].selected_index = 1;
-
-        let state = search_bar.get_filter_state();
-        assert_eq!(state, vec![1, 1]);
-    }
-
-    #[test]
-    fn test_restore_filter_state() {
-        let facets = vec![
-            Facet::new("●", vec!["All".to_string(), "Some".to_string()], 0),
-            Facet::new("☍", vec!["Any".to_string(), "Specific".to_string()], 0),
-        ];
-        let mut search_bar = FacetedSearchBar::new(facets);
-
-        // Save and restore state
-        let state = vec![1, 1];
-        let result = search_bar.restore_filter_state(&state);
-        assert!(result);
-
-        assert_eq!(search_bar.facets[0].selected_index, 1);
-        assert_eq!(search_bar.facets[1].selected_index, 1);
-        assert_eq!(search_bar.get_filter_value(0), Some("Some"));
-        assert_eq!(search_bar.get_filter_value(1), Some("Specific"));
-    }
-
-    #[test]
-    fn test_restore_filter_state_invalid() {
-        let facets = vec![Facet::new("●", vec!["All".to_string()], 0)];
-        let mut search_bar = FacetedSearchBar::new(facets);
-
-        // Try to restore state with wrong length
-        let state = vec![0, 0]; // Too many items
-        let result = search_bar.restore_filter_state(&state);
         assert!(!result);
     }
 }

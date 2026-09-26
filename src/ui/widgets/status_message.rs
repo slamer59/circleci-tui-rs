@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_status_message_creation() {
-        let msg = StatusMessage::success("Operation successful");
+        let msg = StatusMessage::new("Operation successful", MessageLevel::_Success);
         assert_eq!(msg.text, "Operation successful");
         assert_eq!(msg.level, MessageLevel::_Success);
         assert!(!msg.is_expired());
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_message_levels() {
-        let success = StatusMessage::success("Success");
+        let success = StatusMessage::new("Success", MessageLevel::_Success);
         assert_eq!(success.level, MessageLevel::_Success);
 
         let info = StatusMessage::info("Info");
@@ -119,7 +119,8 @@ mod tests {
 
     #[test]
     fn test_expiration() {
-        let msg = StatusMessage::success("Test").with_duration(Duration::from_millis(10));
+        let mut msg = StatusMessage::new("Test", MessageLevel::_Success);
+        msg.duration = Duration::from_millis(10);
         assert!(!msg.is_expired());
 
         std::thread::sleep(Duration::from_millis(20));

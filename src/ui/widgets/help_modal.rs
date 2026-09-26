@@ -393,7 +393,7 @@ mod tests {
     #[test]
     fn test_help_modal_creation() {
         let modal = HelpModal::new();
-        assert!(modal.is_visible());
+        assert!(modal.visible);
     }
 
     #[test]

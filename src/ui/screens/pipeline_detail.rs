@@ -1686,7 +1686,7 @@ mod tests {
                 },
             },
         ];
-        screen.set_jobs(jobs);
+        screen.set_jobs_with_pagination(jobs, None, None);
 
         screen.focus = PanelFocus::Jobs;
         screen.select_next_job();
@@ -1732,12 +1732,13 @@ mod tests {
                 },
             },
         ];
-        screen.set_jobs(jobs);
+        screen.set_jobs_with_pagination(jobs, None, None);
 
         // Set status filter to "failed" via faceted search
         // Facet 0 is status: [All, success, running, failed, pending, blocked]
         // Index 3 is "failed", Facet 1 stays at index 0 (All durations)
-        screen.faceted_search.restore_filter_state(&[3, 0]);
+        screen.faceted_search.set_facet_selection(0, 3);
+        screen.faceted_search.set_facet_selection(1, 0);
 
         let filtered = screen.get_filtered_jobs();
 
@@ -1794,17 +1795,19 @@ mod tests {
                 },
             },
         ];
-        screen.set_jobs(jobs);
+        screen.set_jobs_with_pagination(jobs, None, None);
 
         // Test filtering by "running" status
         // Facet 0 status indices: [0=All, 1=success, 2=running, 3=failed, 4=pending, 5=blocked]
-        screen.faceted_search.restore_filter_state(&[2, 0]);
+        screen.faceted_search.set_facet_selection(0, 2);
+        screen.faceted_search.set_facet_selection(1, 0);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].status, "running");
 
         // Test filtering only failed jobs
-        screen.faceted_search.restore_filter_state(&[3, 0]);
+        screen.faceted_search.set_facet_selection(0, 3);
+        screen.faceted_search.set_facet_selection(1, 0);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert!(filtered
@@ -1861,28 +1864,32 @@ mod tests {
                 },
             },
         ];
-        screen.set_jobs(jobs);
+        screen.set_jobs_with_pagination(jobs, None, None);
 
         // Test "All durations" - should show all jobs
         // Facet 1 duration indices: [0=All, 1=Quick, 2=Short, 3=Medium, 4=Long, 5=Very Long]
-        screen.faceted_search.restore_filter_state(&[0, 0]);
+        screen.faceted_search.set_facet_selection(0, 0);
+        screen.faceted_search.set_facet_selection(1, 0);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 3);
 
         // Test "Quick (< 1min)" - should show only job1
-        screen.faceted_search.restore_filter_state(&[0, 1]);
+        screen.faceted_search.set_facet_selection(0, 0);
+        screen.faceted_search.set_facet_selection(1, 1);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "quick");
 
         // Test "Short (1-5min)" - should show only job2
-        screen.faceted_search.restore_filter_state(&[0, 2]);
+        screen.faceted_search.set_facet_selection(0, 0);
+        screen.faceted_search.set_facet_selection(1, 2);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "short");
 
         // Test "Long (15-30min)" - should show only job3
-        screen.faceted_search.restore_filter_state(&[0, 4]);
+        screen.faceted_search.set_facet_selection(0, 0);
+        screen.faceted_search.set_facet_selection(1, 4);
         let filtered = screen.get_filtered_jobs();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "long");

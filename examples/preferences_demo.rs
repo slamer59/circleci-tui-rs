@@ -16,11 +16,6 @@ fn main() -> Result<()> {
     println!("Loading preferences...");
     let mut manager = PreferencesManager::load()?;
 
-    // Show config file location
-    if let Ok(path) = manager.get_config_path() {
-        println!("Config file: {}\n", path.display());
-    }
-
     // Show current preferences
     let prefs = manager.get_preferences();
     println!("Current preferences:");

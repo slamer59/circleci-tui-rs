@@ -212,13 +212,4 @@ mod tests {
             _ => panic!("Expected Loading"),
         }
     }
-
-    #[test]
-    fn test_clear() {
-        let mut powerline = PowerlineBar::new();
-        powerline.set_loading("Loading...".to_string());
-        powerline.clear();
-
-        matches!(powerline.content, PowerlineContent::Empty);
-    }
 }

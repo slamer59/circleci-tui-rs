@@ -1,11 +1,19 @@
-# Integration Tests
+# Tests
 
-This directory contains integration tests for the CircleCI TUI application. These tests verify that the API client correctly handles various scenarios when communicating with the CircleCI API.
+`tests/config_dotenv.rs` is the only file-based integration test in this crate. The API client's
+HTTP-level tests live next to the code they exercise, in `src/api/client.rs`
+(`#[cfg(test)] mod api_tests`, submodules `integration` and `workflow`), because pointing the client
+at a `mockito` server requires writing its private `base_url` field; the test-only
+`new_with_base_url` constructor was removed in b7738e3.
 
 ## Test Structure
 
-### `integration_test.rs`
-Comprehensive integration tests for individual API client methods using HTTP mocking with `mockito`.
+### `config_dotenv.rs`
+Integration tests for `Config::load`, covering `.env` / `.env.local` handling, environment-variable
+precedence and temp-directory cleanup.
+
+### `src/api/client.rs` — `mod api_tests`
+Comprehensive tests for individual API client methods using HTTP mocking with `mockito`.
 
 **Test Categories:**
 
@@ -13,14 +21,12 @@ Comprehensive integration tests for individual API client methods using HTTP moc
    - `test_get_pipelines_success` - Fetches and parses pipeline data
    - `test_get_workflows_success` - Fetches workflow data for a pipeline
    - `test_get_jobs_success` - Fetches job data for a workflow
-   - `test_rerun_workflow_success` - Triggers a workflow rerun
 
 2. **HTTP Error Cases** - Tests that verify correct error handling for different HTTP status codes:
    - `test_get_pipelines_404_not_found` - Handles missing resources
    - `test_get_workflows_403_forbidden` - Handles permission errors
    - `test_get_jobs_429_rate_limit` - Handles rate limiting
    - `test_get_pipelines_500_server_error` - Handles server errors
-   - `test_rerun_workflow_401_unauthorized` - Handles authentication errors
 
 3. **Malformed JSON Cases** - Tests that verify correct error handling when API returns invalid JSON:
    - `test_get_pipelines_malformed_json` - Handles invalid pipeline JSON
@@ -34,12 +40,11 @@ Comprehensive integration tests for individual API client methods using HTTP moc
    - `test_get_pipelines_with_pagination` - Handles multi-page results
    - `test_get_jobs_with_pagination_token` - Verifies pagination token handling
    - `test_pipelines_with_missing_optional_fields` - Handles missing VCS/trigger info
-   - `test_status_mapping` - Verifies correct status translation
+   - `test_status_mapping` - Verifies pipeline state normalization and raw pass-through of job statuses
    - `test_jobs_duration_calculation` - Verifies duration calculation logic
    - `test_pipelines_revision_shortening` - Verifies SHA shortening to 7 chars
 
-### `workflow_test.rs`
-End-to-end workflow tests that simulate complete user journeys through the API.
+**End-to-end journeys** (submodule `workflow`) simulate complete user journeys through the API.
 
 **Test Scenarios:**
 
@@ -59,55 +64,63 @@ End-to-end workflow tests that simulate complete user journeys through the API.
    - Verifies correct handling of page tokens
    - Ensures all data is retrieved across pages
 
-4. **Rerun Scenario** - `test_complete_flow_with_workflow_rerun`:
-   - Tests the complete flow from viewing to rerunning a workflow
-   - Verifies rerun API interaction
-
 ## Running Tests
 
-### Run all integration tests
+### Run all tests
 ```bash
-cargo test --test integration_test
+cargo test --locked
 ```
 
-### Run all end-to-end workflow tests
+### Run the API client tests
 ```bash
-cargo test --test workflow_test
+cargo test --locked api_tests
 ```
 
-### Run all tests in the tests directory
+### Run only the per-method API tests or the end-to-end journeys
 ```bash
-cargo test --tests
+cargo test --locked api_tests::integration
+cargo test --locked api_tests::workflow
+```
+
+### Run the config integration test
+```bash
+cargo test --locked --test config_dotenv
 ```
 
 ### Run a specific test
 ```bash
-cargo test --test integration_test test_get_pipelines_success
+cargo test --locked test_get_pipelines_success
 ```
 
 ### Run tests with output
 ```bash
-cargo test --test integration_test -- --nocapture
+cargo test --locked api_tests -- --nocapture
 ```
 
 ### Run tests with multiple threads
 ```bash
-cargo test --test integration_test -- --test-threads=4
+cargo test --locked api_tests -- --test-threads=4
 ```
 
 ## Test Coverage
 
 The test suite covers:
 
-- **API Success Cases**: 4 tests
-- **HTTP Error Cases**: 5 tests
+- **API Success Cases**: 3 tests
+- **HTTP Error Cases**: 4 tests
 - **Malformed JSON Cases**: 3 tests
 - **Edge Cases**: 9 tests
-- **End-to-End Workflows**: 4 tests
+- **End-to-End Workflows**: 3 tests
 
-**Total: 25+ integration tests**
+**Total: 22 API tests** (plus the `config_dotenv` integration test)
+
+The workflow-rerun tests were removed with the rerun feature itself (the client method no longer
+exists and `src/app.rs` has the call site commented out).
 
 ## Adding New Tests
+
+New API client tests go into the matching submodule of `#[cfg(test)] mod api_tests` at the end of
+`src/api/client.rs`.
 
 ### Adding a new API method test
 
@@ -184,7 +197,9 @@ async fn test_new_workflow() {
 Creates a new mockito test server for HTTP mocking.
 
 ### `create_test_client(server)`
-Creates a test CircleCI client that points to the mock server instead of the real API.
+Creates a real client via `CircleCIClient::new("test-token", "gh/test-org/test-repo")` and then
+overwrites its private `base_url` with the mock server URL (legal because the tests live in the
+client's own module).
 
 ### Mock Response Helpers
 - `mock_pipeline_response()` - Valid pipeline API response
@@ -244,28 +259,27 @@ page2_mock.assert();
 
 ### View test output
 ```bash
-cargo test --test integration_test -- --nocapture
+cargo test --locked api_tests -- --nocapture
 ```
 
 ### Run a single test with debug output
 ```bash
-RUST_LOG=debug cargo test --test integration_test test_name -- --nocapture
+RUST_LOG=debug cargo test --locked test_name -- --nocapture
 ```
 
 ### Check which mocks were called
 Mockito automatically reports which mocks were not called when `mock.assert()` fails.
 
-## CI/CD Integration
+## CI
 
-These tests are designed to run in CI/CD pipelines:
+`.github/workflows/test.yml` runs the whole suite on every push to `main` and `renovate/**`, and on
+every pull request:
 
 ```yaml
-# Example GitHub Actions workflow
-- name: Run integration tests
-  run: |
-    cargo test --tests
-    cargo test --test integration_test
-    cargo test --test workflow_test
+- name: Build
+  run: cargo build --locked
+- name: Test
+  run: cargo test --locked
 ```
 
 ## Dependencies

@@ -51,6 +51,7 @@ impl ErrorModal {
     /// # Examples
     ///
     /// ```
+    /// # use circleci_tui_rs::ui::widgets::error_modal::ErrorModal;
     /// let modal = ErrorModal::with_details(
     ///     "API Error".to_string(),
     ///     "API returned error 404: Not Found".to_string(),
@@ -306,11 +307,12 @@ mod tests {
 
     #[test]
     fn test_error_modal_creation() {
-        let modal = ErrorModal::new("Error".to_string(), "Test error".to_string());
-        assert!(modal.is_visible());
+        let modal =
+            ErrorModal::with_details("Error".to_string(), "Test error".to_string(), String::new());
+        assert!(modal.visible);
         assert!(!modal.details_expanded);
         assert!(!modal.can_retry);
-        assert!(modal.details.is_none());
+        assert_eq!(modal.details.as_deref(), Some(""));
     }
 
     #[test]
@@ -320,20 +322,23 @@ mod tests {
             "Test error".to_string(),
             "Stack trace here".to_string(),
         );
-        assert!(modal.is_visible());
+        assert!(modal.visible);
         assert!(modal.details.is_some());
         assert!(!modal.details_expanded);
     }
 
     #[test]
     fn test_error_modal_with_retry() {
-        let modal = ErrorModal::new("Error".to_string(), "Test error".to_string()).with_retry();
+        let modal =
+            ErrorModal::with_details("Error".to_string(), "Test error".to_string(), String::new())
+                .with_retry();
         assert!(modal.can_retry);
     }
 
     #[test]
     fn test_error_modal_input() {
-        let mut modal = ErrorModal::new("Error".to_string(), "Test error".to_string());
+        let mut modal =
+            ErrorModal::with_details("Error".to_string(), "Test error".to_string(), String::new());
 
         // Test Close action
         let action = modal.handle_input(KeyEvent::from(KeyCode::Char('c')));
@@ -350,14 +355,17 @@ mod tests {
 
     #[test]
     fn test_error_modal_retry() {
-        let mut modal = ErrorModal::new("Error".to_string(), "Test error".to_string()).with_retry();
+        let mut modal =
+            ErrorModal::with_details("Error".to_string(), "Test error".to_string(), String::new())
+                .with_retry();
 
         // Test Retry action
         let action = modal.handle_input(KeyEvent::from(KeyCode::Char('r')));
         assert_eq!(action, ErrorAction::Retry);
 
         // Test that retry doesn't work without can_retry flag
-        let mut modal_no_retry = ErrorModal::new("Error".to_string(), "Test error".to_string());
+        let mut modal_no_retry =
+            ErrorModal::with_details("Error".to_string(), "Test error".to_string(), String::new());
         let action = modal_no_retry.handle_input(KeyEvent::from(KeyCode::Char('r')));
         assert_eq!(action, ErrorAction::None);
     }
@@ -381,14 +389,5 @@ mod tests {
         // Toggle again
         modal.handle_input(KeyEvent::from(KeyCode::Char('d')));
         assert!(!modal.details_expanded);
-    }
-
-    #[test]
-    fn test_error_modal_hide() {
-        let mut modal = ErrorModal::new("Error".to_string(), "Test error".to_string());
-        assert!(modal.is_visible());
-
-        modal.hide();
-        assert!(!modal.is_visible());
     }
 }

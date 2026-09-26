@@ -31,7 +31,10 @@ use ratatui::backend::Backend;
 use std::time::Duration;
 
 /// Run the application with async support for log streaming
-async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()> {
+async fn run_app<B: Backend>(app: &mut App, terminal: &mut Terminal<B>) -> Result<()>
+where
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
     loop {
         // Process completed background tasks (non-blocking)
         app.process_bg_results();

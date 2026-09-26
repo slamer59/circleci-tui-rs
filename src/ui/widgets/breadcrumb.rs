@@ -14,6 +14,7 @@ use ratatui::widgets::Paragraph;
 ///
 /// # Example
 /// ```
+/// # use circleci_tui_rs::ui::widgets::breadcrumb::render_breadcrumb;
 /// let breadcrumb = render_breadcrumb(&["Home", "Pipelines", "main"]);
 /// ```
 pub fn render_breadcrumb<'a>(segments: &[&'a str]) -> Paragraph<'a> {

@@ -42,6 +42,19 @@ impl SshModal {
     /// # Examples
     ///
     /// ```
+    /// # use circleci_tui_rs::api::models::{ExecutorInfo, Job};
+    /// # use circleci_tui_rs::ui::widgets::ssh_modal::SshModal;
+    /// # let job = Job {
+    /// #     id: "5f3a9c1d2b".to_string(),
+    /// #     name: "build".to_string(),
+    /// #     status: "success".to_string(),
+    /// #     job_number: 42,
+    /// #     workflow_id: "wf-001".to_string(),
+    /// #     started_at: None,
+    /// #     stopped_at: None,
+    /// #     duration: None,
+    /// #     executor: ExecutorInfo { executor_type: "docker".to_string() },
+    /// # };
     /// let modal = SshModal::new(job);
     /// ```
     pub fn new(job: Job) -> Self {
@@ -254,7 +267,7 @@ mod tests {
     fn test_ssh_modal_creation() {
         let job = create_test_job();
         let modal = SshModal::new(job);
-        assert!(modal.is_visible());
+        assert!(modal.visible);
         assert!(modal.ssh_command.contains("ssh -p 64535"));
         assert!(modal.ssh_command.contains("123-90db2e@"));
     }
@@ -275,16 +288,6 @@ mod tests {
         // Test Esc (Close)
         let action = modal.handle_input(KeyEvent::from(KeyCode::Esc));
         assert_eq!(action, SshAction::Close);
-    }
-
-    #[test]
-    fn test_ssh_modal_hide() {
-        let job = create_test_job();
-        let mut modal = SshModal::new(job);
-        assert!(modal.is_visible());
-
-        modal.hide();
-        assert!(!modal.is_visible());
     }
 
     #[test]

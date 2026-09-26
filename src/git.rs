@@ -74,7 +74,7 @@ pub fn get_current_branch() -> Option<String> {
     }
 
     // Get the local branch name first as fallback
-    let local_branch = head.shorthand().map(|s| s.to_string())?;
+    let local_branch = head.shorthand().ok()?.to_string();
 
     // Try to get the upstream branch (what origin has)
     let upstream_name = match repo.find_branch(&local_branch, git2::BranchType::Local) {

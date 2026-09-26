@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(input.value(), "");
         assert_eq!(input.placeholder, "Placeholder");
         assert_eq!(input.cursor_pos, 0);
-        assert!(!input.is_focused());
+        assert!(!input.focused);
     }
 
     #[test]
