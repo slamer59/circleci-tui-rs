@@ -67,6 +67,20 @@ impl Config {
             project_slug,
         })
     }
+
+    /// Build a configuration for `--demo` mode.
+    ///
+    /// Demo mode never reads `.env` files and needs no CircleCI account: it
+    /// renders the sample pipelines bundled in `api::models::mock_data` and never
+    /// contacts the CircleCI API. The token is left empty so that any accidental
+    /// API call fails instead of using someone's real credentials, and the slug
+    /// matches the sample data so the header reads meaningfully.
+    pub fn demo() -> Self {
+        Self {
+            circle_token: String::new(),
+            project_slug: "gh/acme/api-service".to_string(),
+        }
+    }
 }
 
 #[cfg(test)]

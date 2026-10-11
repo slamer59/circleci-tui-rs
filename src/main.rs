@@ -390,16 +390,28 @@ async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let export_mode = args.iter().any(|a| a == "-e" || a == "--export");
     let all_steps = args.iter().any(|a| a == "--all-steps");
+    // Demo mode: bundled sample pipelines, no credentials, no API calls
+    let demo = args.iter().any(|a| a == "-d" || a == "--demo");
 
-    // Load configuration
-    let config = match Config::load() {
-        Ok(cfg) => cfg,
-        Err(err) => {
-            eprintln!("Failed to load configuration: {}", err);
-            eprintln!("\nPlease create a .env file with the following variables:");
-            eprintln!("  CIRCLECI_TOKEN=your_token_here");
-            eprintln!("  PROJECT_SLUG=gh/owner/repo");
-            std::process::exit(1);
+    if export_mode && demo {
+        eprintln!("Error: --export needs a real CircleCI token, so it cannot be used with --demo.");
+        std::process::exit(1);
+    }
+
+    // Load configuration (demo mode needs none)
+    let config = if demo {
+        Config::demo()
+    } else {
+        match Config::load() {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                eprintln!("Failed to load configuration: {}", err);
+                eprintln!("\nPlease create a .env file with the following variables:");
+                eprintln!("  CIRCLECI_TOKEN=your_token_here");
+                eprintln!("  PROJECT_SLUG=gh/owner/repo");
+                eprintln!("\nOr run `circleci-tui --demo` to explore the UI with sample data.");
+                std::process::exit(1);
+            }
         }
     };
 
@@ -424,7 +436,7 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app (now async)
-    let mut app = match App::new(config).await {
+    let mut app = match App::new(config, demo).await {
         Ok(app) => app,
         Err(err) => {
             // Restore terminal before showing error

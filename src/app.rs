@@ -84,6 +84,8 @@ pub struct App {
     pub should_quit: bool,
     /// CircleCI API client
     pub api_client: Arc<CircleCIClient>,
+    /// Demo mode: render bundled sample data and never call the CircleCI API
+    pub demo: bool,
     /// Loading state
     pub is_loading: bool,
     /// Confirmation modal for actions like rerun workflow
@@ -122,7 +124,10 @@ pub struct App {
 
 impl App {
     /// Create a new application instance
-    pub async fn new(config: Config) -> Result<Self> {
+    ///
+    /// When `demo` is true the app renders the bundled sample pipelines and never
+    /// contacts the CircleCI API, so no credentials are required.
+    pub async fn new(config: Config, demo: bool) -> Result<Self> {
         // Load preferences
         let mut preferences = PreferencesManager::load()?;
 
@@ -133,7 +138,10 @@ impl App {
         )?);
 
         // Fetch user identity if cache is stale
-        let (authenticated_user, authenticated_user_name) = if preferences.is_user_cache_stale() {
+        let (authenticated_user, authenticated_user_name) = if demo {
+            // Demo mode stays offline: no user lookup, no network.
+            (None, None)
+        } else if preferences.is_user_cache_stale() {
             match api_client.get_me().await {
                 Ok(me) => {
                     let login = me.login.clone();
@@ -208,6 +216,7 @@ impl App {
             log_modal: None,
             should_quit: false,
             api_client,
+            demo,
             confirm_modal: None,
             error_modal: None,
             help_modal: None,
@@ -590,7 +599,12 @@ impl App {
     /// Load pipelines from the API
     ///
     /// This is an async method that fetches pipelines and updates the screen state.
+    /// In demo mode it is a no-op: the screen keeps the bundled sample pipelines.
     pub async fn load_pipelines(&mut self) -> Result<()> {
+        if self.demo {
+            return Ok(());
+        }
+
         self.is_loading = true;
 
         // Extract filters from pipeline screen
@@ -737,9 +751,42 @@ impl App {
         }
     }
 
+    /// Report that demo mode has no API access.
+    ///
+    /// Returns true when the caller must stop: demo mode renders the bundled
+    /// sample pipelines and must never issue a CircleCI request.
+    fn demo_blocks_api(&mut self) -> bool {
+        if self.demo {
+            // Nothing is requested, so nothing may keep spinning.
+            self.is_loading = false;
+            self.is_fetching = false;
+            self.pipeline_screen.loading_workflows = false;
+            if let Some(detail) = &mut self.pipeline_detail_screen {
+                detail.loading_workflows = false;
+                detail.loading_jobs = false;
+                detail.loading_more_jobs = false;
+            }
+            self.status_message = Some(StatusMessage::info(
+                "Demo mode: sample data only, no CircleCI API calls".to_string(),
+            ));
+            return true;
+        }
+        false
+    }
+
     /// Spawn a background task to load job logs (non-blocking)
     pub fn spawn_log_load(&mut self, job_number: u32) {
         use crate::cache::log_cache::CacheStatus;
+
+        if self.demo {
+            // Demo mode has no API access: explain instead of showing a spinner.
+            if let Some(modal) = &mut self.log_modal {
+                modal.set_logs(vec![
+                    "Demo mode: bundled sample data only, job logs are not fetched.".to_string(),
+                ]);
+            }
+            return;
+        }
 
         // Check cache first (sync, fast)
         if let Ok(CacheStatus::Valid(entry)) = self.log_cache_manager.get(job_number) {
@@ -790,6 +837,9 @@ impl App {
 
     /// Spawn a background task to load workflows (non-blocking)
     pub fn spawn_workflow_load(&mut self, pipeline_id: String) {
+        if self.demo_blocks_api() {
+            return;
+        }
         self.is_loading = true;
         let client = Arc::clone(&self.api_client);
         let tx = self.bg_sender.clone();
@@ -807,6 +857,9 @@ impl App {
 
     /// Spawn a background task to load jobs (non-blocking)
     pub fn spawn_job_load(&mut self, workflow_id: String) {
+        if self.demo_blocks_api() {
+            return;
+        }
         self.is_loading = true;
         let client = Arc::clone(&self.api_client);
         let tx = self.bg_sender.clone();
@@ -827,6 +880,9 @@ impl App {
 
     /// Spawn a background task to load more jobs (non-blocking)
     pub fn spawn_more_jobs_load(&mut self, workflow_id: String, page_token: String) {
+        if self.demo_blocks_api() {
+            return;
+        }
         if let Some(detail) = &mut self.pipeline_detail_screen {
             detail.loading_more_jobs = true;
         }
@@ -850,6 +906,10 @@ impl App {
     /// Spawn a background task to fetch powerline logs (non-blocking)
     pub fn spawn_powerline_log_load(&mut self, job_number: u32) {
         use crate::cache::log_cache::CacheStatus;
+
+        if self.demo_blocks_api() {
+            return;
+        }
 
         // Clear the pending flag immediately
         if let Some(detail) = &mut self.pipeline_detail_screen {
@@ -893,6 +953,9 @@ impl App {
 
     pub fn spawn_failed_jobs_log_fetch(&mut self, failed_jobs: Vec<(u32, String)>) {
         use crate::ui::widgets::log_modal::LogModal;
+        if self.demo_blocks_api() {
+            return;
+        }
         let client = Arc::clone(&self.api_client);
         let tx = self.bg_sender.clone();
         let cwd = std::env::current_dir().ok();
@@ -1438,7 +1501,7 @@ mod tests {
     #[tokio::test]
     async fn test_app_creation() {
         let config = create_test_config();
-        let app = App::new(config).await.unwrap();
+        let app = App::new(config, false).await.unwrap();
 
         assert!(matches!(app.current_screen, Screen::Pipelines));
         assert!(!app.should_quit);
@@ -1450,7 +1513,7 @@ mod tests {
     #[tokio::test]
     async fn test_navigation_to_pipeline_detail() {
         let config = create_test_config();
-        let mut app = App::new(config).await.unwrap();
+        let mut app = App::new(config, false).await.unwrap();
 
         let pipeline = create_test_pipeline();
 
@@ -1470,7 +1533,7 @@ mod tests {
     #[tokio::test]
     async fn test_log_modal_operations() {
         let config = create_test_config();
-        let mut app = App::new(config).await.unwrap();
+        let mut app = App::new(config, false).await.unwrap();
 
         let job = create_test_job();
 
@@ -1487,7 +1550,7 @@ mod tests {
     #[tokio::test]
     async fn test_navigation_closes_modal() {
         let config = create_test_config();
-        let mut app = App::new(config).await.unwrap();
+        let mut app = App::new(config, false).await.unwrap();
 
         let pipeline = create_test_pipeline();
         let job = create_test_job();
@@ -1505,7 +1568,7 @@ mod tests {
     #[tokio::test]
     async fn test_two_screen_architecture() {
         let config = create_test_config();
-        let mut app = App::new(config).await.unwrap();
+        let mut app = App::new(config, false).await.unwrap();
 
         let pipeline = create_test_pipeline();
 
@@ -1527,7 +1590,7 @@ mod tests {
     #[tokio::test]
     async fn test_error_modal_operations() {
         let config = create_test_config();
-        let mut app = App::new(config).await.unwrap();
+        let mut app = App::new(config, false).await.unwrap();
 
         // Show an API error (errors are surfaced through show_api_error)
         app.show_api_error(anyhow::anyhow!("Something went wrong"));
@@ -1541,7 +1604,7 @@ mod tests {
     #[tokio::test]
     async fn test_error_modal_with_details() {
         let config = create_test_config();
-        let mut app = App::new(config).await.unwrap();
+        let mut app = App::new(config, false).await.unwrap();
 
         // Show error with details: App builds it via ErrorModal::with_details(..).with_retry()
         app.show_api_error(anyhow::anyhow!("Request failed"));

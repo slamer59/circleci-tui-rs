@@ -92,6 +92,20 @@ Your project slug follows the format: `<vcs>/<org>/<repo>`
 
 ## Usage
 
+### Demo Mode
+
+Don't have a CircleCI token handy? Run the UI against the sample data bundled in
+the binary:
+
+```bash
+circleci-tui --demo   # or -d
+```
+
+Demo mode reads no `.env` file, requires no credentials and makes no CircleCI API
+calls, so it is safe to run anywhere. It shows the sample pipeline list bundled
+in the binary; workflow, job and log views need the API and stay empty, and the
+status bar says so.
+
 ### Keyboard Shortcuts
 
 #### Navigation
