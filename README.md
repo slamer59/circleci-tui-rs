@@ -7,9 +7,9 @@ A fast, keyboard-driven terminal user interface (TUI) for monitoring and interac
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
 ![CircleCI](https://img.shields.io/badge/circle%20ci-%23161616.svg?style=for-the-badge&logo=circleci&logoColor=white)
 
-![circleci-tui: the pipeline list, filtering down to matching pipelines, and the keyboard shortcut modal](assets/preview.gif)
+![circleci-tui: the pipeline list, filtering down to matching pipelines, opening a pipeline's workflows and jobs, and the keyboard shortcut modal](assets/preview.gif)
 
-*`circleci-tui --demo` — the pipeline list, filtering and help screen, with no CircleCI token required.*
+*`circleci-tui --demo` — the pipeline list, filtering, a pipeline's workflows and jobs, and the help screen, with no CircleCI token required.*
 
 ## Features
 
@@ -106,9 +106,9 @@ circleci-tui --demo   # or -d
 ```
 
 Demo mode reads no `.env` file, requires no credentials and makes no CircleCI API
-calls, so it is safe to run anywhere. It shows the sample pipeline list bundled
-in the binary; workflow, job and log views need the API and stay empty, and the
-status bar says so.
+calls, so it is safe to run anywhere. It serves the sample pipelines, workflows and
+jobs bundled in the binary, so the pipeline detail screen is populated too. Job logs
+need the API: opening one says so rather than showing an empty view.
 
 ### Keyboard Shortcuts
 

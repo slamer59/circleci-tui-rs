@@ -837,7 +837,11 @@ impl App {
 
     /// Spawn a background task to load workflows (non-blocking)
     pub fn spawn_workflow_load(&mut self, pipeline_id: String) {
-        if self.demo_blocks_api() {
+        if self.demo {
+            // Demo mode: serve the bundled sample workflows instead of the API.
+            self.is_loading = true;
+            let workflows = crate::api::models::mock_data::mock_workflows(&pipeline_id);
+            let _ = self.bg_sender.send(BgTaskResult::WorkflowsLoaded(workflows));
             return;
         }
         self.is_loading = true;
@@ -857,7 +861,14 @@ impl App {
 
     /// Spawn a background task to load jobs (non-blocking)
     pub fn spawn_job_load(&mut self, workflow_id: String) {
-        if self.demo_blocks_api() {
+        if self.demo {
+            // Demo mode: serve the bundled sample jobs instead of the API.
+            self.is_loading = true;
+            let jobs = crate::api::models::mock_data::mock_jobs(&workflow_id);
+            let _ = self.bg_sender.send(BgTaskResult::JobsLoaded {
+                jobs,
+                next_page_token: None,
+            });
             return;
         }
         self.is_loading = true;

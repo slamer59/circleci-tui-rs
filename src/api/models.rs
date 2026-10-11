@@ -326,4 +326,84 @@ pub mod mock_data {
             },
         ]
     }
+
+    /// Sample workflows for a pipeline, used by `--demo`.
+    ///
+    /// Ids are derived from the pipeline so the demo stays self-consistent.
+    pub fn mock_workflows(pipeline_id: &str) -> Vec<Workflow> {
+        let now = Utc::now();
+        let wf = |suffix: &str| format!("{}-{}", pipeline_id, suffix);
+
+        vec![
+            Workflow {
+                id: wf("wf-build"),
+                name: "build-and-test".to_string(),
+                status: "success".to_string(),
+                created_at: now - Duration::hours(2),
+                stopped_at: Some(now - Duration::hours(1) - Duration::minutes(46)),
+                pipeline_id: pipeline_id.to_string(),
+            },
+            Workflow {
+                id: wf("wf-staging"),
+                name: "deploy-staging".to_string(),
+                status: "success".to_string(),
+                created_at: now - Duration::hours(1) - Duration::minutes(45),
+                stopped_at: Some(now - Duration::hours(1) - Duration::minutes(31)),
+                pipeline_id: pipeline_id.to_string(),
+            },
+            Workflow {
+                id: wf("wf-production"),
+                name: "deploy-production".to_string(),
+                status: "failed".to_string(),
+                created_at: now - Duration::hours(1) - Duration::minutes(30),
+                stopped_at: Some(now - Duration::hours(1) - Duration::minutes(12)),
+                pipeline_id: pipeline_id.to_string(),
+            },
+        ]
+    }
+
+    /// Sample jobs for a workflow, used by `--demo`.
+    pub fn mock_jobs(workflow_id: &str) -> Vec<Job> {
+        let now = Utc::now();
+        let job = |number: u32, name: &str, status: &str, started_mins: i64, secs: u32| Job {
+            id: format!("{}-job-{}", workflow_id, number),
+            name: name.to_string(),
+            status: status.to_string(),
+            job_number: number,
+            workflow_id: workflow_id.to_string(),
+            started_at: Some(now - Duration::minutes(started_mins)),
+            stopped_at: Some(now - Duration::minutes(started_mins) + Duration::seconds(secs as i64)),
+            duration: Some(secs),
+            executor: ExecutorInfo {
+                executor_type: "docker".to_string(),
+            },
+        };
+
+        // Numbers are stable per workflow so the list reads like a real run.
+        let base = workflow_id.bytes().map(|b| b as u32).sum::<u32>() % 900 + 100;
+        let on_production = workflow_id.ends_with("wf-production");
+        let on_staging = workflow_id.ends_with("wf-staging");
+
+        if on_staging {
+            vec![
+                job(base, "publish-image", "success", 105, 96),
+                job(base + 1, "deploy-staging", "success", 98, 42),
+                job(base + 2, "smoke-tests", "success", 95, 28),
+            ]
+        } else if on_production {
+            vec![
+                job(base, "approve-release", "success", 90, 15),
+                job(base + 1, "deploy-production", "failed", 88, 37),
+                job(base + 2, "verify-release", "canceled", 87, 0),
+            ]
+        } else {
+            vec![
+                job(base, "checkout", "success", 120, 8),
+                job(base + 1, "lint", "success", 119, 24),
+                job(base + 2, "unit-tests", "success", 118, 133),
+                job(base + 3, "integration-tests", "success", 115, 261),
+                job(base + 4, "build-image", "success", 110, 78),
+            ]
+        }
+    }
 }
