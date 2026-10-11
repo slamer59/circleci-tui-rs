@@ -7,6 +7,10 @@ A fast, keyboard-driven terminal user interface (TUI) for monitoring and interac
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
 ![CircleCI](https://img.shields.io/badge/circle%20ci-%23161616.svg?style=for-the-badge&logo=circleci&logoColor=white)
 
+![circleci-tui: the pipeline list, filtering down to matching pipelines, and the keyboard shortcut modal](assets/preview.gif)
+
+*`circleci-tui --demo` — the pipeline list, filtering and help screen, with no CircleCI token required.*
+
 ## Features
 
 - 📊 **Pipeline Overview** - View recent pipelines for your project at a glance
